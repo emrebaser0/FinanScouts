@@ -9,4 +9,3 @@ xgboost
 lightgbm
 xgboost
 catboost 
-statsmodels.tsa.seasonal
