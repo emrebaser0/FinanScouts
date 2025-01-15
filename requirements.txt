@@ -6,3 +6,4 @@ bs4
 yfinance 
 scikit-learn
 xgboost 
+lightgbm
