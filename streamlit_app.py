@@ -27,7 +27,7 @@ from scipy.stats import f_oneway
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from statsmodels.stats.multicomp import MultiComparison
-
+from statsmodels.formula.api import ols
 import statsmodels.stats.api as sms
 from scipy.stats import ttest_1samp, shapiro, levene, ttest_ind, mannwhitneyu, \
     pearsonr, spearmanr, kendalltau, f_oneway, kruskal
@@ -519,6 +519,385 @@ def update_legend_marker_size(handle, orig, size):
 
 
 
+
+def perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg, cat_but_car_arg, key_oneki):
+    # Yeni oluşturulan sütunun unique değer sayısını kontrol edelim
+    unique_values = p2_df[new_label].unique()
+    num_unique_values = len(unique_values)
+
+    if num_unique_values == 1:
+        # Tek unique değer varsa işlem yapmayalım ve bilgi verelim
+        st.write(
+            f"{new_label} değişkeninde tek unique değer bulunmaktadır, işlem yapılmadı.")
+
+    elif num_unique_values >= 2:
+        if num_unique_values > 2:
+            st.write(f"İkiden fazla unique değer bulunmaktadır (nan değerlere dikkat!). İstatistiksel analiz için test seçiniz:")
+
+            # Ekstra tablolar ve analizleri gösterelim
+            selected_test = st.selectbox(
+                "İki örneklem T Testi mi yoksa Oran Testi mi yapmak istiyorsunuz?",
+                ["Hiçbir işlem yapmak istemiyorum", "ANOVA"],
+                key=f"{key_oneki}_1_test_type_{counter}"
+            )
+
+        elif num_unique_values == 2:
+            st.write(f"İki unique değer bulunmaktadır. İstatistiksel analiz için test seçiniz:")
+
+            # Ekstra tablolar ve analizleri gösterelim
+            selected_test = st.selectbox(
+                "İki örneklem T Testi mi yoksa Oran Testi mi yapmak istiyorsunuz?",
+                ["Hiçbir işlem yapmak istemiyorum", "İki Örneklem T Testi",
+                 "İki Örneklem Oran Testi", "ANOVA"],
+                key=f"{key_oneki}_2_test_type_{counter}"
+            )
+
+
+        ####### T TESTİ
+        if selected_test == "İki Örneklem T Testi":
+
+            cat_cols, num_cols, cat_but_car, num_but_cat = grab_col_names(p2_df, num_but_cat_arg,
+                                                                          cat_but_car_arg)
+
+            all_cols = num_cols + cat_cols
+
+            # Bağımsız ve bağımlı değişken seçimi
+            ind_var = new_label
+
+            dep_var = st.selectbox('Bağımlı değişkeni seçin (nümerik olmalı):',
+                                       options=all_cols,
+                                       key=f"{key_oneki}_dep_var_{counter}_t_test")
+
+            # Normallik Varsayımı
+            # Normallik Varsayımı
+            st.write("**1. Normallik Varsayımı**")
+            st.write("**Hipotezler:** \n\n **H0:** Normal dağılım varsayımı sağlanmaktadır. \n\n **H1:** Normal dağılım varsayımı sağlanmamaktadır.")
+            p_values = []  # Normallik testinin p-value'larını saklamak için
+
+            for unique_value in p2_df[ind_var].unique():
+                test_stat, pvalue = shapiro(p2_df.loc[p2_df[ind_var] == unique_value, dep_var])
+                st.write(f'**Bağımsız değişken: {ind_var} - Unique Değer: {unique_value}**')
+                st.write(f'Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
+                p_values.append(pvalue)  # Her bir grubun p-value değeri listeye eklenir
+
+            # Normallik varsayımı kontrolü
+            if all(p < 0.05 for p in p_values):  # Her iki p-value değeri de 0.05'ten küçükse
+                st.write("**H0 RED:** Yani normallik varsayımı sağlanmamaktadır.")
+                normallik_saglandi = False
+
+            else:
+                st.write("**H0 REDDEDİLEMEZ:** Yani normallik varsayımı sağlanmaktadır.")
+                normallik_saglandi = True
+
+            # Varyans Homojenliği
+            if normallik_saglandi:
+                st.write("**2. Varyans Homojenliği**")
+                st.write(
+                    "**Hipotezler:** \n\n **H0:** Varyanslar Homojendir. \n\n **H1:** Varyanslar Homojen Değildir.")
+                test_stat, pvalue = levene(
+                    p2_df.loc[p2_df[ind_var] == p2_df[ind_var].unique()[0], dep_var],
+                    p2_df.loc[p2_df[ind_var] == p2_df[ind_var].unique()[1], dep_var]
+                )
+                st.write(
+                    f'**Varyans Homojenliği Testi** - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
+                # P-değerinin NaN olup olmadığını kontrol edelim
+                if np.isnan(pvalue):
+                    st.write(
+                        "**P-değeri NaN:** Test sonucuna karar verilemiyor. Varyans homojenliği hakkında kesin bir sonuca varılamadı.")
+                    equal_var = None
+                else:
+                    if pvalue < 0.05:
+                        st.write("**H0 RED:** Yani varyans homojenliği sağlanmamaktadır.")
+                        equal_var = False
+                    else:
+                        st.write(
+                            "**H0 REDDEDİLEMEZ:** Yani varyans homojenliği sağlanmaktadır.")
+                        equal_var = True
+            else:
+                st.write(
+                    "**Normal dağılım varsayımı sağlanmadığı için varyans homojenliği varsayımına bakılmaksızın teste geçilecek.**")
+                equal_var = False
+
+            if equal_var is None:
+                st.write("**Veri setinde NaN değerler var. Çalışma durduruldu!**")
+
+            else:
+                # Ortalama ve Medyanların Gösterilmesi
+                st.write("**3. Grupların Ortalama ve Medyanları:**")
+                st.write(p2_df.groupby(ind_var).agg({dep_var: ["mean", "median"]}))
+
+                # Testlerin uygulanması
+                st.write("**4. Test Sonuçları:**")
+                st.write(
+                    "**Hipotezler:** \n\n **H0:** M1 = M2  : Bağımsız değişken grup ortalamaları ile bağımlı değişken arasında anlamlı ilişki yoktur. \n\n **H1:** M1 != M2 : ağımsız değişken grup ortalamaları ile bağımlı değişken arasında anlamlı ilişki vardır.")
+                if normallik_saglandi:  # Normallik sağlanıyorsa T testi yapılacak
+                    test_stat, pvalue = ttest_ind(
+                        p2_df.loc[p2_df[ind_var] == p2_df[ind_var].unique()[0], dep_var],
+                        p2_df.loc[p2_df[ind_var] == p2_df[ind_var].unique()[1], dep_var],
+                        equal_var=equal_var
+                    )
+                    st.write(f'**T Testi - Test Stat** - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
+                else:  # Normallik sağlanmıyorsa Mann-Whitney U testi kullanılacak
+                    test_stat, pvalue = mannwhitneyu(
+                        p2_df.loc[p2_df[ind_var] == p2_df[ind_var].unique()[0], dep_var],
+                        p2_df.loc[p2_df[ind_var] == p2_df[ind_var].unique()[1], dep_var]
+                    )
+                    st.write(
+                        f'**Mann-Whitney U Testi** - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
+
+                # Sonuçların yorumlanması
+                if pvalue < 0.05:
+                    st.write(
+                        f"**H0 REDDEDİLDİ:** Yani seçilen bağımsız değişken ({ind_var}) ile bağımlı değişken ({dep_var}) arasında anlamlı fark vardır.")
+                else:
+                    st.write(
+                        f"**H0 REDDEDİLEMEZ:** Yani seçilen bağımsız değişken ({ind_var}) ile bağımlı değişken ({dep_var}) arasında anlamlı fark yoktur.")
+
+
+        ####### ORAN TESTİ
+        elif selected_test == "İki Örneklem Oran Testi":
+
+            cat_cols, num_cols, cat_but_car, num_but_cat = grab_col_names(p2_df, num_but_cat_arg,
+                                                                          cat_but_car_arg)
+
+            all_cols = num_cols + cat_cols
+
+            st.write(f"Türetilen değişkenin unique değerleri: {[p2_df[new_label].unique()][0]}")
+
+            # Hedef değişken için kullanıcıdan seçim alalım
+            fe_target_var = st.selectbox('Hedef değişkeni seçin:',
+                                             options=all_cols,
+                                             key=f"{key_oneki}_fe_target_var_{counter}_z_test")
+
+            # Eğer herhangi bir seçim yapmazsa döngü sonlandırılabilir
+            if not fe_target_var:
+                st.write("Herhangi bir değişken seçilmedi.")
+
+            else:
+                # Başarı değerinin ne olduğunu belirleyelim
+                success_value = st.selectbox(
+                    f"Başarı oranı için '{fe_target_var}' değişkeninde hangi değeri başarı olarak kabul ediyorsunuz?",
+                    options=p2_df[fe_target_var].unique(),
+                    key=f"{key_oneki}_success_value_{counter}"
+                )
+
+                # İki grup için başarı oranlarını hesaplayalım
+                group1 = unique_values[0]
+                group2 = unique_values[1]
+
+                # Grup 1 ve Grup 2'nin başarı oranları ve gözlem sayıları
+                group1_success = p2_df.loc[(p2_df[new_label] == group1) & (
+                        p2_df[fe_target_var] == success_value), fe_target_var].count()
+                group2_success = p2_df.loc[(p2_df[new_label] == group2) & (
+                        p2_df[fe_target_var] == success_value), fe_target_var].count()
+
+                group1_nobs = p2_df.loc[p2_df[new_label] == group1, fe_target_var].shape[0]
+                group2_nobs = p2_df.loc[p2_df[new_label] == group2, fe_target_var].shape[0]
+
+                # Başarı oranı hesaplama
+                group1_success_rate = group1_success / group1_nobs if group1_nobs != 0 else 0
+                group2_success_rate = group2_success / group2_nobs if group2_nobs != 0 else 0
+
+                # Sonuçları tablo şeklinde göstermek için DataFrame oluşturalım
+                success_df = pd.DataFrame({
+                    f"Grup {new_label}": [group1, group2],
+                    "Başarı Sayısı": [group1_success, group2_success],
+                    "Gözlem Sayısı": [group1_nobs, group2_nobs],
+                    "Başarı Oranı": [group1_success_rate, group2_success_rate]
+                })
+
+                st.write("**Grup bazında başarı oranları:**")
+                st.dataframe(success_df)
+
+                st.write("**Test Sonuçları:**")
+                st.write("**Hipotezler:** \n\n **H0:** p1 = p2  : Bağımsız değişken grup başarım oranı ile bağımlı değişken arasında anlamlı ilişki yoktur. \n\n **H1:** p1 != p2 : Bağımsız değişken grup başarım oranı ile bağımlı değişken arasında anlamlı ilişki vardır.")
+
+                if group1_nobs == 0 or group2_nobs == 0:  # Boş kümelerde test yapmamak için kontrol
+                    st.write(f"Yeterli veri yok. Test yapılmadı.")
+                else:
+                    # İstatistiki analiz: Oranlar testi (proportions_ztest)
+                    oran_test_stat, oran_pvalue = proportions_ztest(
+                        count=[group1_success, group2_success],
+                        nobs=[group1_nobs, group2_nobs]
+                    )
+
+                    st.write(
+                        f'proportions_ztest // H0 için Test Stat = {oran_test_stat:.4f}, p-value = {oran_pvalue:.4f}')
+                    if oran_pvalue < 0.05:
+                        st.write(
+                            f"**H0 hipotezi reddedildi:** Yani seçilen bağımsız değişken ({new_label}) ile hedef değişken ({fe_target_var}) arasında fark vardır.")
+                    else:
+                        st.write(
+                            f"**H0 hipotezi reddedilemedi:** Yani seçilen bağımsız değişken ({new_label}) ile hedef değişken ({fe_target_var}) arasında fark yoktur.")
+
+
+
+
+        ####### ANOVA TESTİ
+        elif selected_test == "ANOVA":
+            cat_cols, num_cols, cat_but_car, num_but_cat = grab_col_names(p2_df, num_but_cat_arg,
+                                                                          cat_but_car_arg)
+
+            all_cols = num_cols + cat_cols
+
+            # Bağımsız ve bağımlı değişken seçimi
+            anova_ind_var = new_label
+
+            anova_dep_var = st.selectbox('Bağımlı değişkeni seçin (nümerik-sürekli olmalı):',
+                                             options=num_cols, key=f"{key_oneki}_anova_dep_var_{counter}")
+
+            # NaN değerleri ayrı bir grup olarak inceleyelim
+            unique_groups = p2_df[anova_ind_var].unique().tolist()
+
+            # NaN değerleri manuel olarak ekliyoruz
+            if p2_df[anova_ind_var].isna().sum() > 0:
+                unique_groups.append(np.nan)  # NaN'ı gruba ekle
+
+            group_sizes = {
+                group: len(p2_df.loc[p2_df[anova_ind_var] == group, anova_dep_var]) if pd.notna(
+                    group)
+                else len(p2_df.loc[p2_df[anova_ind_var].isna(), anova_dep_var]) for group in
+                unique_groups
+            }
+
+            st.write("**0. Test için yeterli veri sayısı bulunuyor mu? Veri sayıları:**")
+            # Her grup için boyutları yazdırıyoruz
+            for group, size in group_sizes.items():
+                if pd.isna(group):
+                    st.write(f"**Group:** NaN, Size: {size}")
+                else:
+                    st.write(f"**Group:** {group}, Size: {size}")
+
+            # Eğer herhangi bir grup 3'ten küçükse, uyarı verip işlemi durduruyoruz
+            if any(size < 3 for size in group_sizes.values()):
+                st.write("Her bir grupta en az 3 veri bulunmalıdır. Test işlemi yapılamıyor.")
+
+            else:
+                # Normallik Varsayımı (Shapiro Testi)
+                st.write("**1. Normallik Varsayımı**")
+                normallik_kontrolu = []
+                for group in unique_groups:
+                    anovanom_pvalue = shapiro(p2_df.loc[p2_df[anova_ind_var] == group, anova_dep_var])[1]
+                    st.write(f'**Grup:** {group} - p-value: {anovanom_pvalue:.4f}')
+                    normallik_kontrolu.append(anovanom_pvalue)
+                    if anovanom_pvalue < 0.05:
+                        st.write(f"Grup '{group}' için normallik varsayımı sağlanmamaktadır.")
+                    else:
+                        st.write(f"Grup '{group}' için normallik varsayımı sağlanmaktadır.")
+
+                # Varyans Homojenliği (Levene Testi)
+                st.write("**2. Varyans Homojenliği**")
+                test_stat, anovavar_pvalue = levene(
+                    *[p2_df.loc[p2_df[anova_ind_var] == group, anova_dep_var] for group in unique_groups]
+                )
+                st.write(
+                    f'Varyans Homojenliği Testi - Test Stat = {test_stat:.4f}, p-value = {anovavar_pvalue:.4f}')
+
+                # P-değerinin NaN olup olmadığını kontrol edelim
+                if np.isnan(anovavar_pvalue):
+                    st.write(
+                        "**P-değeri NaN: Test sonucuna karar verilemiyor. Varyans homojenliği hakkında kesin bir sonuca varılamadı. Veri setinde nan değerler var!**")
+
+                else:
+                    if anovavar_pvalue < 0.05:
+                        st.write("**H0 RED:** Yani varyans homojenliği sağlanmamaktadır.")
+                    else:
+                        st.write("**H0 REDDEDİLEMEZ:** Yani varyans homojenliği sağlanmaktadır.")
+
+
+                    # Ortalama ve Medyanların Gösterilmesi
+                    st.write("**3. Grupların Ortalama ve Medyanları:**")
+                    st.write(p2_df.groupby(anova_ind_var).agg({anova_dep_var: ["mean", "median"]}))
+
+
+                    # Varsayımlara göre testlerin seçilmesi
+                    st.write("**4. Uygulanacak Test:**")
+                    st.write(
+                        "**Hipotez:** \n\n **H0:** m1 = m2 = m3 = m4 ...  : Grup ortalamaları arasında fark yoktur. \n\n **H1:** m1 = m2 = m3 = m4 ...  : Grup ortalamaları arasında fark vardır.""")
+
+                    if all(p >= 0.05 for p in normallik_kontrolu):
+                        if anovavar_pvalue >= 0.05:
+                            # Normallik ve varyans homojenliği sağlanıyorsa f-oneway
+                            st.write(
+                                "Normallik ve varyans homojenliği sağlandığından Parametrik ANOVA testi (f-oneway) uygulanacak.")
+                            test_stat, anovap_pvalue = f_oneway(
+                                *[p2_df.loc[p2_df[anova_ind_var] == group, anova_dep_var] for group in
+                                  unique_groups]
+                            )
+                            st.write(
+                                f'**Parametrik ANOVA Testi (f-oneway)** - Test Stat = {test_stat:.4f}, p-value = {anovap_pvalue:.4f}')
+                            if anovap_pvalue < 0.05:
+                                st.write(
+                                    f"**H0 reddedildi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                            else:
+                                st.write(
+                                    f"**H0 reddedilemedi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
+                        else:
+                            # Normallik sağlanıyor ama varyans homojenliği sağlanmıyorsa Welch ANOVA ve Kruskal sonuçları
+                            st.write(
+                                "Normallik sağlanıyor, ancak varyans homojenliği sağlanmadığından Kruskal-Wallis testi uygulanacak, ayrıca welch-ANOVA testi de gösterilecek.")
+
+                            # Kruskal-Wallis testi
+                            test_stat, anovanonp_pvalue = kruskal(
+                                *[p2_df.loc[p2_df[anova_ind_var] == group, anova_dep_var] for group in
+                                  unique_groups]
+                            )
+                            st.write(
+                                f'**Nonparametrik ANOVA Testi (Kruskal)** - Test Stat = {test_stat:.4f}, p-value = {anovanonp_pvalue:.4f}')
+                            if anovanonp_pvalue < 0.05:
+                                st.write(
+                                    f"**H0 reddedildi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                            else:
+                                st.write(
+                                    f"**H0 reddedilemedi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
+
+                            # Welch ANOVA için type seçimi
+                            welch_type = st.selectbox(
+                                "Welch ANOVA için Type seçiniz (I, II, III):",
+                                options=[1, 2, 3],
+                                index=1,  # Default olarak Type II (index 1) seçili
+                                key=f"welch_type_{counter}"
+                            )
+
+                            # Welch ANOVA
+                            model = ols(f'{anova_dep_var} ~ {anova_ind_var}', data=p2_df).fit()
+                            welch_anova_table = sm.stats.anova_lm(model, typ=welch_type, robust='hc3')
+                            st.write("**Welch ANOVA Testi**:")
+                            st.write(welch_anova_table)
+
+                    else:
+                        # Normallik veya varyans homojenliği sağlanmadığında sadece Kruskal-Wallis testi uygulanacak
+                        st.write(
+                            "Normallik varsayımı sağlanmadığından Kruskal-Wallis testi uygulanacak.")
+                        test_stat, anovanonp_pvalue = kruskal(
+                            *[p2_df.loc[p2_df[anova_ind_var] == group, anova_dep_var] for group in
+                              unique_groups]
+                        )
+                        st.write(
+                            f'**Nonparametrik ANOVA Testi (Kruskal)** - Test Stat = {test_stat:.4f}, p-value = {anovanonp_pvalue:.4f}')
+                        if anovanonp_pvalue < 0.05:
+                            st.write(
+                                f"**H0 reddedildi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                        else:
+                            st.write(
+                                f"**H0 reddedilemedi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
+
+                    # Tukey HSD Testi
+                    st.write("**5. Tukey HSD testi:**")
+                    st.write(
+                        "Anlamlı farkın hangi gruptan kaynaklandığını anlamak için Tukey HSD testi uygulayabilirsiniz:")
+                    tk_value = st.number_input(
+                        'Tukey HSD Testi için tk (yanlış pozitiflik riski) değerini girin (genel kabul değer 0.05 - default)',
+                        value=0.05, key=f"{key_oneki}_tk_value_{counter}")
+
+                    # Tukey HSD testi
+                    comparison = MultiComparison(p2_df[anova_dep_var], p2_df[anova_ind_var])
+                    tukey = comparison.tukeyhsd(tk_value)
+
+                    # Tukey sonuçlarını DataFrame olarak gösterelim
+                    tukey_df = pd.DataFrame(data=tukey.summary().data[1:],
+                                            columns=tukey.summary().data[0])
+                    st.write(tukey_df)
 
 
 
@@ -2109,8 +2488,7 @@ def main():
                                                 key=f"target_col_{cacounter}"
                                             )
 
-                                            categorical_cols = df.select_dtypes(
-                                                include=['object', 'category']).columns.tolist()
+
                                             selected_categorical = st.multiselect(
                                                 "Select categorical variables for filtering or groupby (optional)",
                                                 options=categorical_cols
@@ -2400,6 +2778,7 @@ def main():
     
                                 Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizin doğasına göre hangi farkların daha önemli olduğunu değerlendirmelisiniz.""",
                                                   key=f"lebelebeleb_{mpcounter}")
+
                                 cat_cols, num_cols, cat_but_car, num_but_cat = grab_col_names(df, num_but_cat_arg,
                                                                                                   cat_but_car_arg)
 
@@ -2413,92 +2792,94 @@ def main():
                                                            options=all_cols,
                                                            key=f"dep_var_{mpcounter}")
 
-                                # Eğer herhangi bir seçim yapmazsa döngü sonlandırılabilir
-                                if not ind_var:
-                                    st.write("Herhangi bir değişken seçilmedi. Döngü sonlandırılıyor.")
-                                    break
-
-                                # Eğer herhangi bir seçim yapmazsa döngü sonlandırılabilir
-                                if not dep_var:
-                                    st.write("Herhangi bir değişken seçilmedi. Döngü sonlandırılıyor.")
-                                    break
 
                                 # Bağımsız değişkenin unique değerlerinin kontrolü
                                 unique_values = df[ind_var].nunique()
                                 if unique_values > 2:
                                     st.error(
                                             f"Bağımsız değişkenin ({ind_var}) unique değer sayısı {unique_values}. ANOVA testi yapılmalıdır!")
-                                    break
-
-                                # Normallik Varsayımı
-                                st.write("1. Normallik Varsayımı")
-                                p_values = []  # Normallik testinin p-value'larını saklamak için
-                                for unique_value in df[ind_var].unique():
-                                    test_stat, pvalue = shapiro(df.loc[df[ind_var] == unique_value, dep_var])
-                                    st.write(f'Bağımsız değişken: {ind_var} - Unique Değer: {unique_value}')
-                                    st.write(f'Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
-                                    p_values.append(pvalue)  # Her bir grubun p-value değeri listeye eklenir
-
-                                # Normallik varsayımı kontrolü
-                                if all(p < 0.05 for p in p_values):  # Her iki p-value değeri de 0.05'ten küçükse
-                                    st.write("H0 RED: Normallik varsayımı sağlanmamaktadır.")
-                                    normallik_saglandi = False
 
                                 else:
-                                    st.write("H0 REDDEDİLEMEZ: Normallik varsayımı sağlanmaktadır.")
-                                    normallik_saglandi = True
+                                    # Normallik Varsayımı
+                                    st.write("**1. Normallik Varsayımı**")
+                                    st.write("**Hipotezler:** \n\n **H0:** Normal dağılım varsayımı sağlanmaktadır. \n\n **H1:** Normal dağılım varsayımı sağlanmamaktadır.")
+                                    p_values = []  # Normallik testinin p-value'larını saklamak için
+                                    for unique_value in df[ind_var].unique():
+                                        test_stat, pvalue = shapiro(df.loc[df[ind_var] == unique_value, dep_var])
+                                        st.write(f'**Bağımsız değişken: {ind_var} - Unique Değer: {unique_value}**')
+                                        st.write(f'Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
+                                        p_values.append(pvalue)  # Her bir grubun p-value değeri listeye eklenir
 
-                                # Varyans Homojenliği
-                                if normallik_saglandi:
-                                    st.write("2. Varyans Homojenliği")
-                                    test_stat, pvalue = levene(
-                                            df.loc[df[ind_var] == df[ind_var].unique()[0], dep_var],
-                                            df.loc[df[ind_var] == df[ind_var].unique()[1], dep_var]
-                                        )
-                                    st.write(
-                                            f'Varyans Homojenliği Testi - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
-                                    if pvalue < 0.05:
-                                        st.write("H0 RED: Varyans homojenliği sağlanmamaktadır.")
-                                        equal_var = False
+                                    # Normallik varsayımı kontrolü
+                                    if all(p < 0.05 for p in p_values):  # Her iki p-value değeri de 0.05'ten küçükse
+                                        st.write("**H0 RED:** Yani normallik varsayımı sağlanmamaktadır.")
+                                        normallik_saglandi = False
+
                                     else:
-                                        st.write("H0 REDDEDİLEMEZ: Varyans homojenliği sağlanmaktadır.")
-                                        equal_var = True
-                                else:
-                                    equal_var = False
+                                        st.write("**H0 REDDEDİLEMEZ:** Yani normallik varsayımı sağlanmaktadır.")
+                                        normallik_saglandi = True
+
+                                    # Varyans Homojenliği
+                                    if normallik_saglandi:
+                                        st.write("**2. Varyans Homojenliği**")
+                                        st.write("**Hipotezler:** \n\n **H0:** Varyanslar Homojendir. \n\n **H1:** Varyanslar Homojen Değildir.")
+                                        test_stat, pvalue = levene(
+                                                df.loc[df[ind_var] == df[ind_var].unique()[0], dep_var],
+                                                df.loc[df[ind_var] == df[ind_var].unique()[1], dep_var]
+                                            )
+                                        st.write(
+                                                f'**Varyans Homojenliği Testi** - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
+                                        # P-değerinin NaN olup olmadığını kontrol edelim
+                                        if np.isnan(pvalue):
+                                            st.write(
+                                                "**P-değeri NaN:** Test sonucuna karar verilemiyor. Varyans homojenliği hakkında kesin bir sonuca varılamadı.")
+                                            equal_var = None
+                                        else:
+                                            if pvalue < 0.05:
+                                                st.write("**H0 RED:** Yani varyans homojenliği sağlanmamaktadır.")
+                                                equal_var = False
+                                            else:
+                                                st.write(
+                                                    "**H0 REDDEDİLEMEZ:** Yani varyans homojenliği sağlanmaktadır.")
+                                                equal_var = True
+                                    else:
+                                        st.write("**Normal dağılım varsayımı sağlanmadığı için varyans homojenliği varsayımına bakılmaksızın teste geçilecek.**")
+                                        equal_var = False
+
+                                    if equal_var is None:
+                                        st.write("**Veri setinde NaN değerler var. Çalışma durduruldu!**")
+
+                                    else:
+                                        # Ortalama ve Medyanların Gösterilmesi
+                                        st.write("**3. Grupların Ortalama ve Medyanları:**")
+                                        st.write(df.groupby(ind_var).agg({dep_var: ["mean", "median"]}))
 
 
+                                        # Testlerin uygulanması
+                                        st.write("**4. Test Sonuçları:**")
+                                        st.write("**Hipotezler:** \n\n **H0:** M1 = M2  : Bağımsız değişken grup ortalamaları ile bağımlı değişken arasında anlamlı ilişki yoktur. \n\n **H1:** M1 != M2 : ağımsız değişken grup ortalamaları ile bağımlı değişken arasında anlamlı ilişki vardır.")
+                                        if normallik_saglandi:  # Normallik sağlanıyorsa T testi yapılacak
+                                            test_stat, pvalue = ttest_ind(
+                                                    df.loc[df[ind_var] == df[ind_var].unique()[0], dep_var],
+                                                    df.loc[df[ind_var] == df[ind_var].unique()[1], dep_var],
+                                                    equal_var=equal_var
+                                                )
+                                            st.write(f'**T Testi - Test Stat** - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
+                                        else:  # Normallik sağlanmıyorsa Mann-Whitney U testi kullanılacak
+                                            test_stat, pvalue = mannwhitneyu(
+                                                    df.loc[df[ind_var] == df[ind_var].unique()[0], dep_var],
+                                                    df.loc[df[ind_var] == df[ind_var].unique()[1], dep_var]
+                                                )
+                                            st.write(
+                                                    f'**Mann-Whitney U Testi** - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
 
-                                # Ortalama ve Medyanların Gösterilmesi
-                                st.write("Grupların Ortalama ve Medyanları:")
-                                st.write(df.groupby(ind_var).agg({dep_var: ["mean", "median"]}))
-
-
-                                # Testlerin uygulanması
-                                st.write("Test Sonuçları:")
-                                if normallik_saglandi:  # Normallik sağlanıyorsa T testi yapılacak
-                                    test_stat, pvalue = ttest_ind(
-                                            df.loc[df[ind_var] == df[ind_var].unique()[0], dep_var],
-                                            df.loc[df[ind_var] == df[ind_var].unique()[1], dep_var],
-                                            equal_var=equal_var
-                                        )
-                                    st.write(f'T Testi - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
-                                else:  # Normallik sağlanmıyorsa Mann-Whitney U testi kullanılacak
-                                    test_stat, pvalue = mannwhitneyu(
-                                            df.loc[df[ind_var] == df[ind_var].unique()[0], dep_var],
-                                            df.loc[df[ind_var] == df[ind_var].unique()[1], dep_var]
-                                        )
-                                    st.write(
-                                            f'Mann-Whitney U Testi - Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
-
-                                # Sonuçların yorumlanması
-                                if pvalue < 0.05:
-                                    st.write(
-                                            f"H0 RED Edildi: Seçilen bağımsız değişken ({ind_var}) ile bağımlı değişken ({dep_var}) arasında anlamlı fark vardır.")
-                                else:
-                                    st.write(
-                                            f"H0 REDDEDİLEMEZ: Seçilen bağımsız değişken ({ind_var}) ile bağımlı değişken ({dep_var}) arasında anlamlı fark yoktur.")
-
-
+                                        # Sonuçların yorumlanması
+                                        if pvalue < 0.05:
+                                            st.write(
+                                                    f"**H0 RED Edildi:** Yani seçilen bağımsız değişken ({ind_var}) ile bağımlı değişken ({dep_var}) arasında anlamlı fark vardır.")
+                                        else:
+                                            st.write(
+                                                    f"**H0 REDDEDİLEMEZ:** Yani seçilen bağımsız değişken ({ind_var}) ile bağımlı değişken ({dep_var}) arasında anlamlı fark yoktur.")
 
                             ################################################################################################
                             ##################   İki Örneklem Oran Testi
@@ -2509,140 +2890,148 @@ def main():
 
                                 st.button("Yorumlama hk.", help="""Soru: iki örneklem T testi sonucunda anlamlı ilişki bulurken iki örneklem oran testinde anlamlı ilişki yoktur sonucuna ulaşıyorum. bu mümkün müdür? nasıl yorumlamam gerekiyor? Cevap: Evet, iki örneklem T testi ve iki örneklem oran testi farklı sonuçlar verebilir, ve bu durumu anlamak ve yorumlamak önemlidir. Bunun mümkün olup olmadığını ve nasıl yorumlanacağını daha ayrıntılı olarak açıklayayım:
 
-### 1. **İki Örneklem T Testi**
-- **Amaç**: İki örneklem T testi, iki grup arasındaki **ortalama farkını** test eder. Yani, iki grubun ortalamaları arasında anlamlı bir fark olup olmadığını kontrol eder.
-- **Varsayımlar**: 
-  - Verilerin normal dağılıma sahip olması.
-  - Varyansların homojen olması (eşit varyans).
-  - Bağımsız örneklem.
-  
-T testi, sayısal (kesintisiz) bir değişkenin iki grup arasında ortalamasını karşılaştırmak için kullanılır. Eğer gruplar arasında ortalama farkı önemliyse, bu test sonucunda anlamlı bir ilişki bulabilirsiniz.
+                                ### 1. **İki Örneklem T Testi**
+                                - **Amaç**: İki örneklem T testi, iki grup arasındaki **ortalama farkını** test eder. Yani, iki grubun ortalamaları arasında anlamlı bir fark olup olmadığını kontrol eder.
+                                - **Varsayımlar**: 
+                                  - Verilerin normal dağılıma sahip olması.
+                                  - Varyansların homojen olması (eşit varyans).
+                                  - Bağımsız örneklem.
 
-### 2. **İki Örneklem Oran Testi (Proportions Z-Test)**
-- **Amaç**: İki örneklem oran testi, iki grup arasındaki **oran farkını** test eder. Yani, iki grubun belirli bir olayı yaşama oranları arasında anlamlı bir fark olup olmadığını kontrol eder.
-- **Varsayımlar**: 
-  - Her iki grubun örnek büyüklüğü yeterince büyük olmalıdır.
-  - Bağımsız örneklem.
+                                T testi, sayısal (kesintisiz) bir değişkenin iki grup arasında ortalamasını karşılaştırmak için kullanılır. Eğer gruplar arasında ortalama farkı önemliyse, bu test sonucunda anlamlı bir ilişki bulabilirsiniz.
 
-Bu test, genellikle **kategorik** veriler için kullanılır. Eğer bir olayın iki grup arasındaki olasılığı ya da oranı arasında fark olup olmadığını test etmek isterseniz, bu testi kullanırsınız.
+                                ### 2. **İki Örneklem Oran Testi (Proportions Z-Test)**
+                                - **Amaç**: İki örneklem oran testi, iki grup arasındaki **oran farkını** test eder. Yani, iki grubun belirli bir olayı yaşama oranları arasında anlamlı bir fark olup olmadığını kontrol eder.
+                                - **Varsayımlar**: 
+                                  - Her iki grubun örnek büyüklüğü yeterince büyük olmalıdır.
+                                  - Bağımsız örneklem.
 
-### 3. **İki Testin Farklı Sonuçlar Vermesi**
-İki test farklı şeyler ölçtüğünden, farklı sonuçlar vermesi mümkündür. Bunun nedeni şunlar olabilir:
+                                Bu test, genellikle **kategorik** veriler için kullanılır. Eğer bir olayın iki grup arasındaki olasılığı ya da oranı arasında fark olup olmadığını test etmek isterseniz, bu testi kullanırsınız.
 
-1. **Veri Türleri ve Analiz Yaklaşımı Farklıdır**: İki örneklem T testi **kesintisiz (sayısal)** verilerle çalışırken, iki örneklem oran testi **kategorik** verilerle çalışır. Dolayısıyla, bir testin fark bulduğu bir durumda diğer test fark bulamayabilir. Örneğin:
-   - İki grup arasındaki ortalama değerler anlamlı derecede farklı olabilir (T testi anlamlı sonuç verebilir).
-   - Ancak, iki grup arasında olayın gerçekleşme oranları arasında anlamlı bir fark olmayabilir (oran testi anlamlı sonuç vermeyebilir).
+                                ### 3. **İki Testin Farklı Sonuçlar Vermesi**
+                                İki test farklı şeyler ölçtüğünden, farklı sonuçlar vermesi mümkündür. Bunun nedeni şunlar olabilir:
 
-2. **Veri Dağılımı**: İki grup arasındaki dağılımlar farklı olabilir. Örneğin, iki grubun ortalama değeri önemli ölçüde farklı olabilir ancak oranlar (örneğin, bir olayın gerçekleşme oranı) bu kadar fark yaratmayabilir.
+                                1. **Veri Türleri ve Analiz Yaklaşımı Farklıdır**: İki örneklem T testi **kesintisiz (sayısal)** verilerle çalışırken, iki örneklem oran testi **kategorik** verilerle çalışır. Dolayısıyla, bir testin fark bulduğu bir durumda diğer test fark bulamayabilir. Örneğin:
+                                   - İki grup arasındaki ortalama değerler anlamlı derecede farklı olabilir (T testi anlamlı sonuç verebilir).
+                                   - Ancak, iki grup arasında olayın gerçekleşme oranları arasında anlamlı bir fark olmayabilir (oran testi anlamlı sonuç vermeyebilir).
 
-3. **Örneklem Büyüklüğü**: Oran testinde örneklem büyüklüğü veya gözlenen olay sayısı yeterli büyüklükte olmayabilir. T testi daha duyarlı olabilirken, oran testi daha büyük örnek büyüklüklerine ihtiyaç duyabilir.
+                                2. **Veri Dağılımı**: İki grup arasındaki dağılımlar farklı olabilir. Örneğin, iki grubun ortalama değeri önemli ölçüde farklı olabilir ancak oranlar (örneğin, bir olayın gerçekleşme oranı) bu kadar fark yaratmayabilir.
 
-### 4. **Yorumlama**
-- **İki Örneklem T Testi Anlamlı, Oran Testi Anlamsız**: Bu durumda, iki grubun **ortalama** değerleri arasında fark olduğunu, ancak bu farkın oranlar açısından yeterince güçlü olmadığını söyleyebilirsiniz.
-   - Örneğin, grupların ortalama yaşları arasında fark olabilir, ancak iki grubun belirli bir hastalığa yakalanma oranı açısından anlamlı bir fark yoktur.
-   - Bir diğer olasılık ise, iki grup arasında olayın frekansı, oranlara göre farklılık göstermiyor olabilir ama sayısal ölçüm açısından gruplar önemli bir fark sergiliyor olabilir.
-   
-- **Nasıl Yorumlanmalı**: Bu durumda, sayısal bir değişkenin iki grup arasında ortalama bazında farklı olduğunu, ancak bu farkın olayların oranları (kategorik sonuçlar) üzerinde belirgin bir etkisi olmadığını not etmek önemlidir. Yani, ortalamalar açısından iki grup farklı olabilir, fakat oranlar açısından farklılık bulunmamaktadır.
+                                3. **Örneklem Büyüklüğü**: Oran testinde örneklem büyüklüğü veya gözlenen olay sayısı yeterli büyüklükte olmayabilir. T testi daha duyarlı olabilirken, oran testi daha büyük örnek büyüklüklerine ihtiyaç duyabilir.
 
-### Özet:
-- **İki Örneklem T Testi**: İki grup arasındaki ortalamaların farkını test eder. Eğer anlamlıysa, gruplar arasında ortalama değerler arasında anlamlı bir fark vardır.
-- **İki Örneklem Oran Testi**: İki grup arasındaki oran farkını test eder. Eğer anlamlı değilse, bu iki grubun belirli bir olaya yakalanma oranları arasında fark olmadığı anlamına gelir.
-- **Farklı sonuçlar**: Bu durum, sayısal değerler (ortalama farkları) ile kategorik olayların gerçekleşme oranları arasındaki farkların farklı sonuçlar doğurabileceğini gösterir.
+                                ### 4. **Yorumlama**
+                                - **İki Örneklem T Testi Anlamlı, Oran Testi Anlamsız**: Bu durumda, iki grubun **ortalama** değerleri arasında fark olduğunu, ancak bu farkın oranlar açısından yeterince güçlü olmadığını söyleyebilirsiniz.
+                                   - Örneğin, grupların ortalama yaşları arasında fark olabilir, ancak iki grubun belirli bir hastalığa yakalanma oranı açısından anlamlı bir fark yoktur.
+                                   - Bir diğer olasılık ise, iki grup arasında olayın frekansı, oranlara göre farklılık göstermiyor olabilir ama sayısal ölçüm açısından gruplar önemli bir fark sergiliyor olabilir.
 
-Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizin doğasına göre hangi farkların daha önemli olduğunu değerlendirmelisiniz.""", key=f"labalabalab_{mpcounter}")
+                                - **Nasıl Yorumlanmalı**: Bu durumda, sayısal bir değişkenin iki grup arasında ortalama bazında farklı olduğunu, ancak bu farkın olayların oranları (kategorik sonuçlar) üzerinde belirgin bir etkisi olmadığını not etmek önemlidir. Yani, ortalamalar açısından iki grup farklı olabilir, fakat oranlar açısından farklılık bulunmamaktadır.
 
-                                # İşlem yapmak istiyorsa, kullanıcıdan bağımsız değişken seçmesini isteyelim
+                                ### Özet:
+                                - **İki Örneklem T Testi**: İki grup arasındaki ortalamaların farkını test eder. Eğer anlamlıysa, gruplar arasında ortalama değerler arasında anlamlı bir fark vardır.
+                                - **İki Örneklem Oran Testi**: İki grup arasındaki oran farkını test eder. Eğer anlamlı değilse, bu iki grubun belirli bir olaya yakalanma oranları arasında fark olmadığı anlamına gelir.
+                                - **Farklı sonuçlar**: Bu durum, sayısal değerler (ortalama farkları) ile kategorik olayların gerçekleşme oranları arasındaki farkların farklı sonuçlar doğurabileceğini gösterir.
+
+                                Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizin doğasına göre hangi farkların daha önemli olduğunu değerlendirmelisiniz.""",
+                                          key=f"labalabalab_{mpcounter}")
+
+
+                                cat_cols, num_cols, cat_but_car, num_but_cat = grab_col_names(df, num_but_cat_arg,
+                                                                                                  cat_but_car_arg)
+
+                                all_cols = num_cols + cat_cols
+
+                                # Kullanıcıdan bağımsız değişkeni seçmesini isteyelim
                                 oran_selected_column_meas = st.selectbox(
                                     'Bağımsız değişkeni seçin:',
-                                    options=df.columns,
+                                    options=cat_cols,
                                     key=f"oran_selected_column_meas_{mpcounter}"  # mp_counter ile benzersiz key
                                 )
 
+                                # Kullanıcıdan hedef değişkeni seçmesini isteyelim
+                                oran_fe_target_var_meas = st.selectbox(
+                                    'Hedef değişkeni seçin:',
+                                    options=all_cols,
+                                    key=f"oran_fe_target_var_meas_{mpcounter}"  # mp_counter ile benzersiz key
+                                )
+
                                 # Eğer herhangi bir seçim yapmazsa döngü sonlandırılabilir
-                                if not oran_selected_column_meas:
+                                if not oran_selected_column_meas or not oran_fe_target_var_meas:
                                     st.write("Herhangi bir değişken seçilmedi. Döngü sonlandırılıyor.")
-                                    break
 
-                                # Yeni eklenen değişkenin unique değer sayısını kontrol edelim
-                                oran_unique_values_meas = df[oran_selected_column_meas].unique()
-                                oran_num_unique_values_meas = len(oran_unique_values_meas)
-
-                                if oran_num_unique_values_meas == 1:
-                                    # Tek unique değer varsa
-                                    st.write(f"Tek unique değer bulunmaktadır: {oran_unique_values_meas[0]}")
-
-                                elif oran_num_unique_values_meas == 2:
-                                    # İki unique değer varsa proportions_ztest testi yapılacak
-                                    st.write(f"İki unique değer bulunmaktadır. Değerler: {oran_unique_values_meas}")
-
-                                    # Hedef değişken için kullanıcıdan seçim alalım
-                                    oran_fe_target_var_meas = st.selectbox(
-                                        'Hedef değişkeni seçin:',
-                                        options=df.columns,
-                                        key=f"oran_fe_target_var_meas_{mpcounter}"  # mp_counter ile benzersiz key
+                                else:
+                                    # Hedef değişken (Survived gibi) için başarı değerini seçmesi sağlanıyor
+                                    success_value = st.selectbox(
+                                        f"Başarı oranı için '{oran_fe_target_var_meas}' değişkeninde hangi değeri başarı olarak kabul ediyorsunuz?",
+                                        options=df[oran_fe_target_var_meas].unique(),
+                                        key=f"success_value_{mpcounter}"
                                     )
 
-                                    # İki grup için başarı oranlarını hesaplayalım
-                                    group1 = oran_unique_values_meas[0]
-                                    group2 = oran_unique_values_meas[1]
+                                    # Yeni eklenen değişkenin unique değer sayısını kontrol edelim
+                                    oran_unique_values_meas = df[oran_selected_column_meas].unique()
+                                    oran_num_unique_values_meas = len(oran_unique_values_meas)
 
-                                    # Grup 1 ve Grup 2'nin başarı oranları ve gözlem sayıları
-                                    group1_success = df.loc[
-                                        df[oran_selected_column_meas] == group1, oran_fe_target_var_meas].sum()
-                                    group2_success = df.loc[
-                                        df[oran_selected_column_meas] == group2, oran_fe_target_var_meas].sum()
+                                    if oran_num_unique_values_meas == 1:
+                                        # Tek unique değer varsa
+                                        st.write(f"Tek unique değer bulunmaktadır: {oran_unique_values_meas[0]}")
 
-                                    group1_nobs = \
-                                    df.loc[df[oran_selected_column_meas] == group1, oran_fe_target_var_meas].shape[0]
-                                    group2_nobs = \
-                                    df.loc[df[oran_selected_column_meas] == group2, oran_fe_target_var_meas].shape[0]
+                                    elif oran_num_unique_values_meas == 2:
+                                        # İki unique değer varsa proportions_ztest testi yapılacak
+                                        st.write(f"İki unique değer bulunmaktadır. Değerler: {oran_unique_values_meas}")
 
-                                    # Başarı oranı hesaplama
-                                    group1_success_rate = group1_success / group1_nobs if group1_nobs != 0 else 0
-                                    group2_success_rate = group2_success / group2_nobs if group2_nobs != 0 else 0
+                                        # İki grup için başarı oranlarını hesaplayalım
+                                        group1 = oran_unique_values_meas[0]
+                                        group2 = oran_unique_values_meas[1]
 
-                                    # Sonuçları tablo şeklinde göstermek için DataFrame oluşturalım
-                                    success_df = pd.DataFrame({
-                                        "Grup": [group1, group2],
-                                        "Başarı Sayısı": [group1_success, group2_success],
-                                        "Gözlem Sayısı": [group1_nobs, group2_nobs],
-                                        "Başarı Oranı": [group1_success_rate, group2_success_rate]
-                                    })
+                                        # Grup 1 ve Grup 2'nin başarı oranları ve gözlem sayıları
+                                        group1_success = df.loc[
+                                            (df[oran_selected_column_meas] == group1) & (df[
+                                                                                             oran_fe_target_var_meas] == success_value), oran_fe_target_var_meas].count()
+                                        group2_success = df.loc[
+                                            (df[oran_selected_column_meas] == group2) & (df[
+                                                                                             oran_fe_target_var_meas] == success_value), oran_fe_target_var_meas].count()
 
-                                    st.write("Grup bazında başarı oranları:")
-                                    st.dataframe(success_df)
+                                        group1_nobs = \
+                                        df.loc[df[oran_selected_column_meas] == group1, oran_fe_target_var_meas].shape[0]
+                                        group2_nobs = \
+                                        df.loc[df[oran_selected_column_meas] == group2, oran_fe_target_var_meas].shape[0]
 
-                                    # İstatistiki analiz: Oranlar testi (proportions_ztest) tüm unique değerler için yapılacak
-                                    for value in oran_unique_values_meas:
-                                        oran_count_1 = df.loc[
-                                            df[oran_selected_column_meas] == value, oran_fe_target_var_meas].sum()
-                                        oran_count_0 = df.loc[
-                                            df[oran_selected_column_meas] != value, oran_fe_target_var_meas].sum()
-                                        oran_nobs_1 = \
-                                        df.loc[df[oran_selected_column_meas] == value, oran_fe_target_var_meas].shape[0]
-                                        oran_nobs_0 = \
-                                        df.loc[df[oran_selected_column_meas] != value, oran_fe_target_var_meas].shape[0]
+                                        # Başarı oranı hesaplama
+                                        group1_success_rate = group1_success / group1_nobs if group1_nobs != 0 else 0
+                                        group2_success_rate = group2_success / group2_nobs if group2_nobs != 0 else 0
 
-                                        if oran_nobs_0 == 0 or oran_nobs_1 == 0:  # Boş kümelerde test yapmamak için
-                                            st.write(f"Yeterli veri yok: {value} için test yapılmadı.")
-                                            continue
+                                        # Sonuçları tablo şeklinde göstermek için DataFrame oluşturalım
+                                        success_df = pd.DataFrame({
+                                            f"Grup {oran_selected_column_meas}": [group1, group2],
+                                            "Başarı Sayısı": [group1_success, group2_success],
+                                            "Gözlem Sayısı": [group1_nobs, group2_nobs],
+                                            "Başarı Oranı": [group1_success_rate, group2_success_rate]
+                                        })
 
-                                        oran_test_stat, oran_pvalue = proportions_ztest(
-                                            count=[oran_count_1, oran_count_0],
-                                            nobs=[oran_nobs_1, oran_nobs_0])
+                                        st.write("**1. Grup bazında başarı oranları:**")
+                                        st.dataframe(success_df)
 
-                                    st.write(f'H0 için Test Stat = {oran_test_stat:.4f}, p-value = {oran_pvalue:.4f}')
-                                    if oran_pvalue < 0.05:
+                                        st.write("**2. Test Sonuçları**")
+                                        st.write("**Hipotezler:** \n\n **H0:** p1 = p2  : Bağımsız değişken grup başarım oranı ile bağımlı değişken arasında anlamlı ilişki yoktur. \n\n **H1:** p1 != p2 : Bağımsız değişken grup başarım oranı ile bağımlı değişken arasında anlamlı ilişki vardır.")
+
+                                        if group1_nobs == 0 or group2_nobs == 0:  # Boş kümelerde test yapmamak için kontrol
+                                            st.write(f"**Yeterli veri yok. Test yapılmadı.**")
+                                        else:
+                                            oran_test_stat, oran_pvalue = proportions_ztest(
+                                                count=[group1_success, group2_success],
+                                                nobs=[group1_nobs, group2_nobs]
+                                            )
+
+                                            st.write(
+                                                f'H0 için Test Stat = {oran_test_stat:.4f}, p-value = {oran_pvalue:.4f}')
+                                            if oran_pvalue < 0.05:
+                                                st.write(
+                                                    f"**H0 hipotezi reddedildi:** Yani seçilen bağımsız değişken ({oran_selected_column_meas}) ile hedef değişken ({oran_fe_target_var_meas}) arasında fark vardır.")
+                                            else:
+                                                st.write(
+                                                    f"**H0 hipotezi reddedilemedi:** Yani seçilen bağımsız değişken ({oran_selected_column_meas}) ile hedef değişken ({oran_fe_target_var_meas}) arasında fark yoktur.")
+
+                                    elif oran_num_unique_values_meas > 2:
                                         st.write(
-                                            f"H0 hipotezi reddedildi: Seçilen bağımsız değişken ({oran_selected_column_meas}) ile seçilen hedef değişken ({oran_fe_target_var_meas}) arasında fark vardır.")
-                                    else:
-                                        st.write(
-                                            f"H0 hipotezi reddedilemedi: Seçilen bağımsız değişken ({oran_selected_column_meas}) ile seçilen hedef değişken ({oran_fe_target_var_meas}) arasında fark yoktur.")
-
-                                elif oran_num_unique_values_meas > 2:
-                                    # İkiden fazla unique değer varsa ANOVA testi yapılacaktır yazısı gösterilecek
-                                    st.write(
-                                        f"{oran_num_unique_values_meas} unique değer bulunmaktadır. ANOVA testi yapınız.")
+                                            f"{oran_num_unique_values_meas} unique değer bulunmaktadır. ANOVA testi yapınız.")
 
                             ################################################################################################
                             ##################   ANOVA
@@ -2653,13 +3042,11 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 cat_cols, num_cols, cat_but_car, num_but_cat = grab_col_names(df, num_but_cat_arg,
                                                                                               cat_but_car_arg)
 
-                                all_cols = num_cols + cat_cols
-
                                 # Bağımsız ve bağımlı değişken seçimi
                                 anova_ind_var = st.selectbox('Bağımsız değişkeni seçin (kategorik olmalı):',
                                                              options=cat_cols, key=f"anova_ind_var_{mpcounter}")
-                                anova_dep_var = st.selectbox('Bağımlı değişkeni seçin (nümerik olmalı):',
-                                                             options=all_cols, key=f"anova_dep_var_{mpcounter}")
+                                anova_dep_var = st.selectbox('Bağımlı değişkeni seçin (nümerik-sürekli olmalı):',
+                                                             options=num_cols, key=f"anova_dep_var_{mpcounter}")
 
                                 # NaN değerleri ayrı bir grup olarak inceleyelim
                                 unique_groups = df[anova_ind_var].unique().tolist()
@@ -2673,97 +3060,200 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                     else len(df.loc[df[anova_ind_var].isna(), anova_dep_var]) for group in
                                     unique_groups}
 
+                                st.write("**0. Test için yeterli veri sayısı bulunuyor mu? Veri sayıları:**")
                                 # Her grup için boyutları yazdırıyoruz
                                 for group, size in group_sizes.items():
                                     if pd.isna(group):
-                                        st.write(f"Group: NaN, Size: {size}")
+                                        st.write(f"**Group:** NaN, Size: {size}")
                                     else:
-                                        st.write(f"Group: {group}, Size: {size}")
+                                        st.write(f"**Group:** {group}, Size: {size}")
 
                                 # Eğer herhangi bir grup 3'ten küçükse, uyarı verip işlemi durduruyoruz
                                 if any(size < 3 for size in group_sizes.values()):
                                     st.write("Her bir grupta en az 3 veri bulunmalıdır. Test işlemi yapılamıyor.")
-                                    st.stop()  # Kod burada duracak ve devam etmeyecek
 
                                 else:
                                     # Normallik Varsayımı (Shapiro Testi)
-                                    st.write("1. Normallik Varsayımı")
+                                    st.write("**1. Normallik Varsayımı**")
                                     normallik_kontrolu = []
                                     for group in unique_groups:
                                         anovanom_pvalue = shapiro(df.loc[df[anova_ind_var] == group, anova_dep_var])[1]
-                                        st.write(f'Grup: {group} - p-value: {anovanom_pvalue:.4f}')
+                                        st.write(f'**Grup:** {group} - p-value: {anovanom_pvalue:.4f}')
                                         normallik_kontrolu.append(anovanom_pvalue)
                                         if anovanom_pvalue < 0.05:
-                                            st.write(f"Grup {group} için normallik varsayımı sağlanmamaktadır.")
+                                            st.write(f"Grup '{group}' için normallik varsayımı sağlanmamaktadır.")
                                         else:
-                                            st.write(f"Grup {group} için normallik varsayımı sağlanmaktadır.")
+                                            st.write(f"Grup '{group}' için normallik varsayımı sağlanmaktadır.")
 
                                     # Varyans Homojenliği (Levene Testi)
-                                    st.write("2. Varyans Homojenliği")
+                                    st.write("**2. Varyans Homojenliği**")
                                     test_stat, anovavar_pvalue = levene(
                                         *[df.loc[df[anova_ind_var] == group, anova_dep_var] for group in unique_groups]
                                     )
                                     st.write(
                                         f'Varyans Homojenliği Testi - Test Stat = {test_stat:.4f}, p-value = {anovavar_pvalue:.4f}')
-                                    if anovavar_pvalue < 0.05:
-                                        st.write("Varyans homojenliği varsayımı sağlanmamaktadır.")
+
+                                    # P-değerinin NaN olup olmadığını kontrol edelim
+                                    if np.isnan(anovavar_pvalue):
+                                        st.write(
+                                            "**P-değeri NaN: Test sonucuna karar verilemiyor. Varyans homojenliği hakkında kesin bir sonuca varılamadı. Veri setinde nan değerler var!**")
                                     else:
-                                        st.write("Varyans homojenliği varsayımı sağlanmaktadır.")
-
-                                    # Ortalama ve Medyanların Gösterilmesi
-                                    st.write("3. Grupların Ortalama ve Medyanları:")
-                                    st.write(df.groupby(anova_ind_var).agg({anova_dep_var: ["mean", "median"]}))
-
-                                    # Varsayımlara göre testlerin seçilmesi
-                                    st.write("4. Uygulanacak Test")
-                                    if any(p < 0.05 for p in normallik_kontrolu) or anovavar_pvalue < 0.05:
-                                        st.write(
-                                            "Normallik veya varyans homojenliği sağlanmadığından Non-Parametrik ANOVA testi uygulanacak.")
-
-                                        # Kruskal-Wallis testi
-                                        test_stat, anovanonp_pvalue = kruskal(
-                                            *[df.loc[df[anova_ind_var] == group, anova_dep_var] for group in
-                                              unique_groups]
-                                        )
-                                        st.write(
-                                            f'Nonparametrik ANOVA Testi (Kruskal) - Test Stat = {test_stat:.4f}, p-value = {anovanonp_pvalue:.4f}')
-                                        if anovanonp_pvalue < 0.05:
-                                            st.write(
-                                                f"H0 reddedildi: Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                                        if anovavar_pvalue < 0.05:
+                                            st.write("**H0 RED:** Yani varyans homojenliği sağlanmamaktadır.")
                                         else:
-                                            st.write(
-                                                f"H0 reddedilemedi: Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
-                                    else:
-                                        st.write(
-                                            "Normallik ve varyans homojenliği sağlandığından Parametrik ANOVA testi (f-oneway) uygulanacak.")
-                                        test_stat, anovap_pvalue = f_oneway(
-                                            *[df.loc[df[anova_ind_var] == group, anova_dep_var] for group in
-                                              unique_groups]
-                                        )
-                                        st.write(
-                                            f'Parametrik ANOVA Testi - Test Stat = {test_stat:.4f}, p-value = {anovap_pvalue:.4f}')
-                                        if anovap_pvalue < 0.05:
-                                            st.write(
-                                                f"H0 reddedildi: Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                                            st.write("**H0 REDDEDİLEMEZ:** Yani varyans homojenliği sağlanmaktadır.")
+
+                                        # Ortalama ve Medyanların Gösterilmesi
+                                        st.write("**3. Grupların Ortalama ve Medyanları:**")
+                                        st.write(df.groupby(anova_ind_var).agg({anova_dep_var: ["mean", "median"]}))
+
+                                        # Varsayımlara göre testlerin seçilmesi
+                                        st.write("**4. Uygulanacak Test:**")
+                                        st.write("**Hipotez:** \n\n **H0:** m1 = m2 = m3 = m4 ...  : Grup ortalamaları arasında fark yoktur. \n\n **H1:** m1 = m2 = m3 = m4 ...  : Grup ortalamaları arasında fark vardır.""")
+                                        if all(p >= 0.05 for p in normallik_kontrolu):
+                                            if anovavar_pvalue >= 0.05:
+                                                # Normallik ve varyans homojenliği sağlanıyorsa f-oneway
+                                                st.write(
+                                                    "Normallik ve varyans homojenliği sağlandığından Parametrik ANOVA testi (f-oneway) uygulanacak.")
+                                                test_stat, anovap_pvalue = f_oneway(
+                                                    *[df.loc[df[anova_ind_var] == group, anova_dep_var] for group in
+                                                      unique_groups]
+                                                )
+                                                st.write(
+                                                    f'**Parametrik ANOVA Testi (f-oneway)** - Test Stat = {test_stat:.4f}, p-value = {anovap_pvalue:.4f}')
+                                                if anovap_pvalue < 0.05:
+                                                    st.write(
+                                                        f"**H0 reddedildi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                                                else:
+                                                    st.write(
+                                                        f"**H0 reddedilemedi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
+                                            else:
+                                                # Normallik sağlanıyor ama varyans homojenliği sağlanmıyorsa Welch ANOVA ve Kruskal sonuçları
+                                                st.write(
+                                                    "Normallik sağlanıyor, ancak varyans homojenliği sağlanmadığından Kruskal-Wallis testi uygulanacak, ayrıca welch-ANOVA testi de gösterilecek.")
+
+                                                # Kruskal-Wallis testi
+                                                test_stat, anovanonp_pvalue = kruskal(
+                                                    *[df.loc[df[anova_ind_var] == group, anova_dep_var] for group in
+                                                      unique_groups]
+                                                )
+                                                st.write(
+                                                    f'**Nonparametrik ANOVA Testi (Kruskal)** - Test Stat = {test_stat:.4f}, p-value = {anovanonp_pvalue:.4f}')
+                                                if anovanonp_pvalue < 0.05:
+                                                    st.write(
+                                                        f"**H0 reddedildi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                                                else:
+                                                    st.write(
+                                                        f"**H0 reddedilemedi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
+
+                                                # Welch ANOVA için type seçimi
+                                                welch_type = st.selectbox(
+                                                    "Welch ANOVA için Type seçiniz (I, II, III):",
+                                                    options=[1, 2, 3],
+                                                    index=1,  # Default olarak Type II (index 1) seçili
+                                                    key=f"welch_type_{mpcounter}"
+                                                )
+
+                                                st.button("Type seçimi", help=
+                                                          """
+                                                          Type II ve Type III ANOVA arasındaki fark, bağımsız değişkenlerin birbirleriyle etkileşimli olup olmaması ve analiz sırasında nasıl değerlendirildikleriyle ilgilidir. Bu iki tip, özellikle **bağımsız değişkenler arasında etkileşim (interaction)** olup olmadığı durumunda farklılık gösterir.
+
+### **Type II ANOVA (Type II Sum of Squares)**
+
+- **Etkileşim (interaction) yoksa kullanılır**. Bağımsız değişkenlerin ana etkilerini analiz eder.
+- Her bağımsız değişken, diğer değişkenlerin modele dahil olduğunu varsayar, ancak **interaksiyon terimleri** modele dahil edilmez.
+  
+- **Örnek:**
+  Diyelim ki bağımsız değişkenler A ve B var. Type II ANOVA, A'nın etkisini hesaplarken B zaten modelde varmış gibi değerlendirir. Aynı şekilde, B'nin etkisi hesaplanırken A modelde varmış gibi davranır.
+  
+  **Ne zaman kullanılır?**
+  - Bağımsız değişkenler arasında **interaksiyon terimi yoksa** (yani A * B gibi bir etkileşim eklenmemişse), Type II ANOVA kullanılır.
+  - **Ana etkiler** (main effects) arasındaki farklar analiz edilir.
+
+### **Type III ANOVA (Type III Sum of Squares)**
+
+- **Etkileşim terimleri varsa** ya da **etkileşimlerin potansiyel etkisini hesaba katmak istiyorsanız** kullanılır.
+- Her bağımsız değişkenin ana etkisi, diğer bağımsız değişkenler **ve varsa etkileşim terimleri** dikkate alınarak hesaplanır.
+  
+- **Örnek:**
+  Yine A ve B bağımsız değişkenlerimiz olsun ve bir A * B etkileşim terimi olsun. Type III ANOVA, A'nın etkisini değerlendirirken hem B'nin hem de A * B etkileşim teriminin etkilerini dikkate alır. Aynı şekilde, B'nin etkisi de A ve A * B etkileşim terimi dikkate alınarak hesaplanır.
+  
+  **Ne zaman kullanılır?**
+  - Bağımsız değişkenler arasında **etkileşim (interaction) terimi varsa**.
+  - **Ana etkilerin** yanı sıra, **etkileşim etkileri** de analiz edilir. 
+  - **Dengeli olmayan veri setlerinde** ya da **eksik veri** olduğunda Type III ANOVA önerilir çünkü modelin her bir terimin etkisini, diğer terimler modele dahil edilmişken test eder.
+
+### **Özetle:**
+
+- **Type II ANOVA:**
+  - **Etkileşim terimi olmayan** modellerde tercih edilir.
+  - Bağımsız değişkenlerin **ana etkilerini** değerlendirir.
+  - Her bir bağımsız değişkenin etkisini diğer bağımsız değişkenler modelde varmış gibi test eder, ancak **etkileşimleri göz ardı eder**.
+  
+- **Type III ANOVA:**
+  - **Etkileşim terimleri varsa** veya bağımsız değişkenler arasında etkileşim potansiyeli dikkate alınmak isteniyorsa kullanılır.
+  - Hem **ana etkiler** hem de **etkileşim etkileri** test edilir.
+  - Eksik veri ya da **dengeli olmayan tasarımlar** (unbalanced designs) için daha uygundur.
+
+### Örnekle Açıklama:
+
+#### **Type II Örneği (Etkileşim Olmadan):**
+
+Bağımsız değişkenler: Cinsiyet (A), Yaş (B)
+- Type II ANOVA, "Cinsiyetin etkisi nedir?" sorusunu, "Yaş değişkeni zaten kontrol edilmiş durumda" varsayımı altında sorar.
+- Aynı şekilde, "Yaşın etkisi nedir?" sorusu, "Cinsiyet kontrol edilmişken" şeklinde sorulur.
+- **Etkileşim terimi yoktur**.
+
+#### **Type III Örneği (Etkileşim Terimi ile):**
+
+Bağımsız değişkenler: Cinsiyet (A), Yaş (B), ve Cinsiyet * Yaş (A * B)
+- Type III ANOVA, Cinsiyetin etkisini değerlendirirken hem Yaşı hem de Cinsiyet * Yaş etkileşim terimini göz önünde bulundurur.
+- Yaşın etkisi, Cinsiyet ve Cinsiyet * Yaş etkileşim terimi kontrol edilerek test edilir.
+- Burada **etkileşimler dikkate alınır**.
+
+Sonuç olarak, **Type III ANOVA**, bağımsız değişkenler arasında etkileşim terimlerinin varlığına ve bu etkileşimlerin sonuçları nasıl etkilediğine odaklanır. **Type II ANOVA** ise, bağımsız değişkenlerin ana etkilerini etkileşimleri göz ardı ederek test eder.
+                                                          """)
+
+                                                # Welch ANOVA
+                                                model = ols(f'{anova_dep_var} ~ {anova_ind_var}', data=df).fit()
+                                                welch_anova_table = sm.stats.anova_lm(model, typ=welch_type,
+                                                                                      robust='hc3')
+                                                st.write(f"**Welch ANOVA Testi (Type {welch_type})**:")
+                                                st.write(welch_anova_table)
+
+
                                         else:
+                                            # Normallik veya varyans homojenliği sağlanmadığında sadece Kruskal-Wallis testi uygulanacak
                                             st.write(
-                                                f"H0 reddedilemedi: Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
+                                                "Normallik varsayımı sağlanmadığından Kruskal-Wallis testi uygulanacak.")
+                                            test_stat, anovanonp_pvalue = kruskal(
+                                                *[df.loc[df[anova_ind_var] == group, anova_dep_var] for group in
+                                                  unique_groups]
+                                            )
+                                            st.write(
+                                                f'**Nonparametrik ANOVA Testi (Kruskal)** - Test Stat = {test_stat:.4f}, p-value = {anovanonp_pvalue:.4f}')
+                                            if anovanonp_pvalue < 0.05:
+                                                st.write(
+                                                    f"**H0 reddedildi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark vardır.")
+                                            else:
+                                                st.write(
+                                                    f"**H0 reddedilemedi:** Bağımsız değişken ({anova_ind_var}) ile bağımlı değişken ({anova_dep_var}) arasında anlamlı fark yoktur.")
 
-                                    # Tukey HSD Testi
-                                    st.write(
-                                        "Anlamlı fark bulundu. Hangi gruptan kaynaklandığını anlamak için Tukey HSD testi uygulanacak.")
-                                    tk_value = st.number_input(
-                                        'Tukey HSD Testi için tk (yanlış pozitiflik riski) değerini girin (genel kabul değer 0.05 - default)',
-                                        value=0.05, key=f"tk_value_{mpcounter}")
+                                        # Tukey HSD Testi
+                                        st.write("**5. Tukey HSD testi:**")
+                                        st.write("Anlamlı farkın hangi gruptan kaynaklandığını anlamak için Tukey HSD testi uygulayabilirsiniz:")
+                                        tk_value = st.number_input(
+                                            'Tukey HSD Testi için tk (yanlış pozitiflik riski) değerini girin (genel kabul değer 0.05 - default)',
+                                            value=0.05, key=f"tk_value_{mpcounter}")
 
-                                    # Tukey HSD testi
-                                    comparison = MultiComparison(df[anova_dep_var], df[anova_ind_var])
-                                    tukey = comparison.tukeyhsd(tk_value)
+                                        # Tukey HSD testi
+                                        comparison = MultiComparison(df[anova_dep_var], df[anova_ind_var])
+                                        tukey = comparison.tukeyhsd(tk_value)
 
-                                    # Tukey sonuçlarını DataFrame olarak gösterelim
-                                    tukey_df = pd.DataFrame(data=tukey.summary().data[1:],
-                                                            columns=tukey.summary().data[0])
-                                    st.write(tukey_df)
+                                        # Tukey sonuçlarını DataFrame olarak gösterelim
+                                        tukey_df = pd.DataFrame(data=tukey.summary().data[1:],
+                                                                columns=tukey.summary().data[0])
+                                        st.write(tukey_df)
 
 
 
@@ -2942,7 +3432,6 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                 missing_feature_options = [
                     "Hiçbir işlem yapmak istemiyorum",  # Varsayılan seçenek
                     "Missing Value Detection & Analysis",
-                    "Eksik verinin rassallığı",
                     "Handling - Removing & Imputations"
                 ]
 
@@ -3124,7 +3613,7 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 ##############################
 
                                 detayli_analiz1 = fecol2.radio(
-                                    f"Eksik veri yapısını incelemek istiyor musunuz? {counter}:",
+                                    f"Eksik verinin rassalılığını incelemek istiyor musunuz? {counter}:",
                                     ("Hayır", "Evet"),
                                     index=0,
                                     key=f"detayli_analiz1_{counter}")
@@ -3219,110 +3708,6 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 else:
                                     fecol2.write("İnceleme yapılmamıştır.")
 
-                            ##############################
-                            #### MISSING VALUES - Eksik Verinin Rassallığı
-                            ##############################
-                            if missing_selected_feature == "Eksik verinin rassallığı":
-                                fecol1.write("Eksik verinin rassallığını test edin")
-
-                                # Kullanıcıya analiz türünü seçtiriyoruz
-                                randomness_test_type = fecol1.selectbox(
-                                    "Eksik verinin rastgele olup olmadığını hangi yöntemle incelemek istersiniz?",
-                                    options=["MCAR Test (Little's MCAR)", "Missing Value Visualization"],
-                                    key=f"randomness_test_type_{counter}"
-                                )
-
-                                ##############################
-                                #### Little's MCAR Test (MCAR Testi)
-                                ##############################
-                                if randomness_test_type == "MCAR Test (Little's MCAR)":
-                                    fecol1.write("Little's MCAR Testi yapılacak.")
-
-                                    # Kullanıcıya veriyi seçtiriyoruz
-                                    target_variable = fecol1.selectbox(
-                                        "Hangi bağımlı değişken üzerinde analiz yapmak istersiniz?",
-                                        options=p2_df.columns,
-                                        key=f"mcar_test_target_{counter}"
-                                    )
-
-                                    # Little's MCAR testi için verinin hazırlanması ve uygulama
-                                    fecol1.warning(
-                                        "Bu aşama örnek amaçlıdır. MCAR testi için R dilini veya başka istatistik paketlerini kullanmalısınız.")
-                                    fecol1.write(
-                                        "Python'da doğrudan bir MCAR testi yoktur, ancak R paketlerinde uygulanabilir.")
-
-                                ##############################
-                                #### Missing Value Visualization
-                                ##############################
-                                elif randomness_test_type == "Missing Value Visualization":
-                                    fecol1.write("Eksik verilerin görselleştirilmesi yapılacak.")
-
-                                    # Görselleştirme seçeneklerini sunuyoruz
-                                    visualization_type = fecol1.radio(
-                                        "Hangi görselleştirme yöntemini kullanmak istersiniz?",
-                                        options=["Matrix", "Heatmap", "Bar Plot"],
-                                        key=f"missing_visualization_{counter}"
-                                    )
-
-                                    if visualization_type == "Matrix":
-                                        fecol1.write(f"**Eksik Veri Matris Görsellemesi:**")
-                                        fig, ax = plt.subplots(figsize=(8, 5))
-                                        msno.matrix(p2_df, ax=ax)
-                                        fecol1.pyplot(fig)
-
-                                    elif visualization_type == "Heatmap":
-                                        fecol1.write(f"**Eksik Veri Korelasyon (Heatmap) Görsellemesi:**")
-                                        fig, ax = plt.subplots(figsize=(8, 5))
-                                        msno.heatmap(p2_df, ax=ax)
-                                        fecol1.pyplot(fig)
-
-                                    elif visualization_type == "Bar Plot":
-                                        fecol1.write(f"**Eksik Veri Bar Grafiği:**")
-                                        fig, ax = plt.subplots(figsize=(8, 5))
-                                        msno.bar(p2_df, ax=ax)
-                                        fecol1.pyplot(fig)
-
-                                ##############################
-                                #### Missing Value Logistic Regression (Optional)
-                                ##############################
-                                use_logistic_regression = fecol1.checkbox(
-                                    "Eksik veriler için Logistic Regression yapmak ister misiniz?",
-                                    key=f"logistic_regression_{counter}"
-                                )
-
-                                if use_logistic_regression:
-                                    fecol1.write("Eksik verilerin Logistic Regression ile incelenmesi yapılacak.")
-                                    target_var = fecol1.selectbox("Bağımlı değişkeni seçin:", options=p2_df.columns,
-                                                                  key=f"lr_target_var_{counter}")
-
-                                    # Logistic Regression için uygun veri hazırlığı (sadece eksik olan değişkenler üzerinde)
-                                    missing_cols = [col for col in p2_df.columns if p2_df[col].isnull().sum() > 0]
-
-                                    if missing_cols:
-                                        fecol1.write(f"**Eksik veri bulunan sütunlar:** {missing_cols}")
-
-                                        # Logistic Regression modelini eksik değerlere uygulayacağız
-                                        from sklearn.linear_model import LogisticRegression
-                                        from sklearn.model_selection import train_test_split
-
-                                        # Eksik veri sütunları üzerinden modelleme yapılacak
-                                        for col in missing_cols:
-                                            p2_df[f'{col}_missing'] = p2_df[col].isnull().astype(
-                                                int)  # Eksik veri bayrağı
-                                            X = p2_df.dropna(subset=[col]).drop(columns=[col, target_var])
-                                            y = p2_df.dropna(subset=[col])[f'{col}_missing']
-
-                                            # Veri bölme işlemi
-                                            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,
-                                                                                                random_state=42)
-
-                                            # Modelleme
-                                            model = LogisticRegression()
-                                            model.fit(X_train, y_train)
-                                            score = model.score(X_test, y_test)
-
-                                            fecol1.write(
-                                                f"{col} sütunu için Logistic Regression başarı skoru: {score:.2f}")
 
                             ##############################
                             #### MISSING VALUES - Handling - Removing & Imputations
@@ -3700,12 +4085,29 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                             key=f"selected_custom_multiselect_{counter}"
                                         )
 
-                                        # Dictionary to hold custom values for each selected variable
-                                        custom_values = {}
-                                        for col in selected_custom:
-                                            custom_values[col] = fecol1.number_input(f"Enter custom value for {col}:",
-                                                                                     value=0,
-                                                                                     key=f"custom_value_{col}_{counter}")
+                                        # Kullanıcıya numerik mi yoksa text mi girmek istediğini soralım
+                                        is_numeric_input = fecol1.radio(
+                                                f"Do you want to input a numeric value for the selected variable(s)?", ("Evet", "Hayır"),
+                                                key=f"input_type__{counter}")
+
+
+                                        if selected_custom:
+                                            # Kullanıcıya seçime göre input alma
+                                            if is_numeric_input == "Evet":
+                                                custom_values = {}
+                                                for col in selected_custom:
+                                                    # Numeric input
+                                                    custom_values[col] = fecol1.number_input(
+                                                            f"Enter numeric custom value for {col}:",
+                                                            value=0,
+                                                            key=f"custom_value_numeric_{col}_{counter}")
+                                            else:
+                                                custom_values = {}
+                                                for col in selected_custom:
+                                                    # Text input
+                                                    custom_values[col] = fecol1.text_input(f"Enter text custom value for {col}:",
+                                                                                         key=f"custom_value_text_{col}_{counter}")
+
 
                                         if selected_custom:
                                             # Initialize dictionaries to hold the count of filled missing values for each selected variable
@@ -4211,21 +4613,37 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                         na_cols_num = [col for col in na_cols if col in p2_num_cols]
                                         na_cols_cat = [col for col in na_cols if col in p2_cat_cols + p2_cat_but_car]
 
-
-                                        # Categoric Mod Imputation with unique key
+                                        # Custom Value Imputation with unique key
                                         selected_cat_custom = fecol1.multiselect(
-                                            "Select variables to impute with custom string value:",
+                                            "Select variables to impute with custom value:",
                                             [col for col in na_cols_cat],
                                             key=f"selected_cat_custom_multiselect_{counter}"
                                         )
 
-                                        custom_cat_values = {}
-                                        for col in selected_cat_custom:
-                                            custom_cat_values[col] = fecol1.text_input(
-                                                f"Enter custom string value for {col}:", value="N/A",
-                                                key=f"custom_value_input_{col}_{counter}")
+                                        # Kullanıcıya numerik mi yoksa text mi girmek istediğini soralım
+                                        is_categoric_input = fecol1.radio(
+                                            f"Do you want to input a string value for the selected variable(s)?",
+                                            ("Evet", "Hayır"),
+                                            key=f"input_type_cat_{counter}")
 
                                         if selected_cat_custom:
+                                            # Kullanıcıya seçime göre input alma
+                                            if is_categoric_input == "Evet":
+                                                custom_cat_values = {}
+                                                for col in selected_cat_custom:
+                                                    custom_cat_values[col] = fecol1.text_input(
+                                                        f"Enter custom string value for {col}:", value="N/A",
+                                                        key=f"custom_value_input_{col}_{counter}")
+
+                                            else:
+                                                custom_cat_values = {}
+                                                for col in selected_cat_custom:
+                                                    # Numeric input
+                                                    custom_cat_values[col] = fecol1.number_input(
+                                                        f"Enter numeric custom value for {col}:",
+                                                        value=0,
+                                                        key=f"custom_value_numeric_{col}_{counter}")
+
                                             for col in selected_cat_custom:
                                                 # Custom string imputation
                                                 num_missing = p2_df[col].isnull().sum()
@@ -4509,6 +4927,7 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                             ##############################
                             #### STRUCTURE - Time Variable Processing
                             ##############################
+
                             # Time Variable Processing işlemi seçilirse
                             if structure_selected_feature == "Time Variable Processing":
 
@@ -4574,7 +4993,6 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                                         'Minutely': 'T',
                                                         'Secondly': 'S',
                                                         'Millisecondly': 'L',
-                                                        # 'L' represents milliseconds in Pandas frequency strings
                                                         'Daily': 'D',
                                                         'Business Day': 'B',
                                                         'Weekly': 'W',
@@ -4586,7 +5004,8 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                                     selected_freq = fecol2.selectbox(
                                                         "Select the frequency for the time variable:",
                                                         list(freq_options.keys()),
-                                                        key=f"freq_select_{counter}")
+                                                        key=f"freq_select_{counter}"
+                                                    )
                                                     freq_code = freq_options[selected_freq]
 
                                                     fecol2.write(
@@ -4606,29 +5025,23 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                         else:
                                             fecol1.write(f"No conversion was applied to '{selected_time_var}'.")
 
-                                        # Ask if the user wants to set the time variable as index
-                                        set_as_index = fecol2.radio(
-                                            f"Do you want to set '{selected_time_var}' as the index?",
-                                            ("No", "Yes"),
-                                            key=f"set_as_index_{counter}"
-                                        )
+                                    # Ask if the user wants to set the time variable as index
+                                    set_as_index = fecol2.radio(
+                                        f"Do you want to set '{selected_time_var}' as the index?",
+                                        ("No", "Yes"),
+                                        key=f"set_as_index_{counter}"
+                                    )
 
-                                        if set_as_index == "Yes":
-                                            # Sadece seçilen zaman değişkenini indeks olarak ayarla, frekans tanımlaması yapma
-                                            p2_df.set_index(selected_time_var, inplace=True)
-                                            fecol2.write(f"'{selected_time_var}' has been set as the index.")
-                                        else:
-                                            fecol2.write(f"'{selected_time_var}' was not set as the index.")
+                                    if set_as_index == "Yes":
+                                        # Sadece seçilen zaman değişkenini indeks olarak ayarla, frekans tanımlaması yapma
+                                        p2_df.set_index(selected_time_var, inplace=True)
+                                        fecol2.write(f"'{selected_time_var}' has been set as the index.")
+                                    else:
+                                        fecol2.write(f"'{selected_time_var}' was not set as the index.")
 
-
-                                # Display the DataFrame being processed in ptab1
-                                st.write("Current DataFrame:")
-                                st.write(p2_df)
-
-
-
-
-
+                            # Display the DataFrame being processed in ptab1
+                            st.write("Current DataFrame:")
+                            st.write(p2_df)
 
                         ################################################################################################
                         ##################   OUTLIERS ÜST BAŞLIĞI
@@ -4863,31 +5276,33 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 ##############
                                 ## outlier detection for individual column (st)
                                 ##############
-                                st.subheader("Outlier içeren değişkenlerin diğer değişkenler ile birlikte incelenmesi:")
-                                col_name = st.selectbox("Select the column to see outliers in the dataframe:", outlier_cols,
-                                                        key=f"outlier_col_selectbox_{counter}")
+                                if perform_outlier_detection == "Yes":
 
-                                if col_name:
-                                    st.write(f"Detecting outliers in column: `{col_name}`")
+                                    st.subheader("Outlier içeren değişkenlerin diğer değişkenler ile birlikte incelenmesi:")
+                                    col_name = st.selectbox("Select the column to see outliers in the dataframe:", outlier_cols,
+                                                            key=f"outlier_col_selectbox_{counter}")
 
-                                    # Call the function
-                                    outliers, outlier_index = grab_outliers(p2_df, col_name,
-                                                                            low_limit_dict[f"{col_name}_low_limit"],
-                                                                            up_limit_dict[f"{col_name}_up_limit"],
-                                                                            index=True)
+                                    if col_name:
+                                        st.write(f"Detecting outliers in column: `{col_name}`")
 
-                                    # Count the number of outliers
-                                    outlier_count = outliers.shape[0]
+                                        # Call the function
+                                        outliers, outlier_index = grab_outliers(p2_df, col_name,
+                                                                                low_limit_dict[f"{col_name}_low_limit"],
+                                                                                up_limit_dict[f"{col_name}_up_limit"],
+                                                                                index=True)
 
-                                    # Display the count of outliers
-                                    st.write(f"Number of outliers detected: `{outlier_count}`")
+                                        # Count the number of outliers
+                                        outlier_count = outliers.shape[0]
 
-                                    # Add information about outliers
-                                    st.markdown("The outliers with indices in the dataframe:")
-                                    st.write(outliers)
+                                        # Display the count of outliers
+                                        st.write(f"Number of outliers detected: `{outlier_count}`")
 
-                                else:
-                                    st.write("Outlier detection has been skipped.")
+                                        # Add information about outliers
+                                        st.markdown("The outliers with indices in the dataframe:")
+                                        st.write(outliers)
+
+                                    else:
+                                        st.write("Outlier detection has been skipped.")
 
 
 
@@ -5371,12 +5786,12 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 if use_target_var == "Evet":
                                     target_var = fecol1.selectbox("Hedef değişkeni seçin:", options=p2_df.columns,
                                                                   key=f"rare_target_{counter}")
-                                    rare_analysis_results = rare_analyser(p2_df, p2_cat_cols, target=target_var)
+                                    rare_analysis_results = rare_analyser(p2_df, p2_df.columns, target=target_var)
                                     for col, analysis_df in rare_analysis_results.items():
                                         fecol1.write(f"'{col}' değişkeni için rare encoding analizi (NaN dahil):")
                                         fecol1.write(analysis_df)
                                 else:
-                                    rare_analysis_results = rare_analyser(p2_df, p2_cat_cols)
+                                    rare_analysis_results = rare_analyser(p2_df, p2_df.columns)
                                     for col, analysis_df in rare_analysis_results.items():
                                         fecol1.write(f"'{col}' değişkeni için rare encoding analizi (NaN dahil):")
                                         fecol1.write(analysis_df)
@@ -5386,7 +5801,7 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 # Kullanıcıdan rare encoding yapılacak değişkenleri seçmesini isteyelim
                                 selected_cat_cols = fecol2.multiselect(
                                     "Rare Encoding yapılacak kategorik değişkenleri seçin:",
-                                    options=p2_cat_cols,
+                                    options=p2_df.columns,
                                     key=f"rare_cat_cols_multiselect_{counter}"
                                 )
 
@@ -5505,9 +5920,18 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                             fecol2.write(f"'{col}' değişkeni için rare encoding analizi (NaN dahil):")
                                             fecol2.write(analysis_df)
 
+
+
                                     # Güncel DataFrame'i ekranda gösterelim
                                     fecol2.write("Güncel DataFrame:")
                                     fecol2.write(p2_df)
+
+                                    fecol2.subheader("**Seçilen her bir değişken için istatistiksel analiz:**")
+                                    with fecol2:
+                                        for col in selected_cat_cols:
+                                            st.write(f"**'{col}' değişkeni için:**")
+                                            perform_statistical_analysis(p2_df, col, counter, num_but_cat_arg,
+                                                                         cat_but_car_arg, "rareencoding")
 
                                 else:
                                     fecol2.warning("Lütfen en az bir değişken seçin!")
@@ -5586,6 +6010,8 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                             p2_df[col] = ss.fit_transform(p2_df[[col]])
                                             fecol1.success(f"Standard Scaling '{col}' üzerinde başarıyla tamamlandı.")
 
+
+
                                     # Güncel DataFrame'i ekranda gösterelim
                                     fecol1.write("Güncel DataFrame:")
                                     fecol1.write(p2_df)
@@ -5593,6 +6019,7 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                             ##############################
                             #### Scaling - RobustScaler
                             ##############################
+
                             # Label Encoding işlemi seçilirse
                             if scaling_selected_feature == "RobustScaler":
                                 # Kullanıcıdan Robust Scaling yapılacak numerik değişkenleri seçmesini isteyelim
@@ -5648,6 +6075,7 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                             # Orijinal değişken üzerinde scaling işlemi
                                             p2_df[col] = rs.fit_transform(p2_df[[col]])
                                             fecol1.success(f"Robust Scaling '{col}' üzerinde başarıyla tamamlandı.")
+
 
                                     # Güncel DataFrame'i ekranda gösterelim
                                     fecol1.write("Güncel DataFrame:")
@@ -5720,6 +6148,7 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                             p2_df[col] = mms.fit_transform(p2_df[[col]])
                                             fecol1.success(f"MinMax Scaling '{col}' üzerinde başarıyla tamamlandı.")
 
+
                                     # Güncel DataFrame'i ekranda gösterelim
                                     fecol1.write("Güncel DataFrame:")
                                     fecol1.write(p2_df)
@@ -5738,7 +6167,6 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 key=f"feature_selectbox_{counter}_feature"
                             )
 
-
                             #################################################################
                             ##################   FEATURE EXTRACTION - Time değişkeni türetmek
                             #################################################################
@@ -5746,109 +6174,67 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                             # Feature Extraction işlemleri (örnek olarak Time değişkeni türetmek ve diğerleri eklendi)
                             if selected_feature == "Time değişkeni türetmek":
                                 # Zaman serisi içeren sütunlar ve indeks varsayımsız sunulacak
-                                time_columns = ['index'] + list(p2_df.columns)
+                                time_columns = [""] + ['index'] + list(p2_df.columns)
 
                                 # Zaman serisi içeren sütunlardan veya indeksten birini seçelim
                                 time_col = fecol1.selectbox("Zaman serisi içeren değişken veya indeks seçin:",
-                                                          options=time_columns)
+                                                            options=time_columns)
+                                if time_col:
 
-                                # Eğer zaman değişkeni index'te yer alıyorsa, index'i kullanarak işlem yapalım
-                                if time_col == 'index':
-                                    selected_data = p2_df.index
-                                else:
-                                    selected_data = p2_df[time_col]
+                                    # Eğer zaman değişkeni index'te yer alıyorsa, index'i kullanarak işlem yapalım
+                                    if time_col == 'index':
+                                        selected_data = p2_df.index
+                                    else:
+                                        selected_data = p2_df[time_col]
 
-                                # Eğer time_col bir PeriodIndex ise, to_timestamp() ile DatetimeIndex'e dönüştür
-                                if isinstance(selected_data, pd.PeriodIndex):
-                                    selected_data = selected_data.to_timestamp()
+                                    # Eğer time_col bir PeriodIndex ise, to_timestamp() ile DatetimeIndex'e dönüştür
+                                    if isinstance(selected_data, pd.PeriodIndex):
+                                        selected_data = selected_data.to_timestamp()
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım ve her seferinde counter'ı kullanarak dinamik hale getirelim
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                             key=f"user_label_{counter}")
-                                new_label = f"NEW_{user_label}"
+                                    # Eğer seçilen zaman değişkeni datetime değilse, datetime'a dönüştürelim
+                                    if not pd.api.types.is_datetime64_any_dtype(selected_data):
+                                        try:
+                                            selected_data = pd.to_datetime(selected_data)
+                                            fecol1.write(f"'{time_col}' datetime formatına dönüştürüldü.")
+                                        except Exception as e:
+                                            fecol1.write(f"'{time_col}' değişkeni datetime formatına dönüştürülemedi: {e}")
 
-                                # Kullanıcıya hangi özelliği türetmek istediğini dinamik olarak soralım
-                                time_feature = fecol1.selectbox('Türetmek istediğiniz özelliği seçin:',
-                                                              ['year', 'month', 'day', 'day_name', 'Hour', 'Minute',
-                                                               'year_diff', 'month_diff'],
-                                                              key=f'time_feature_{counter}')
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım ve her seferinde counter'ı kullanarak dinamik hale getirelim
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"user_label_{counter}")
+                                    new_label = f"NEW_{user_label}"
 
-                                # Seçilen özelliğe göre işlem yapalım
-                                if time_feature == "year":
-                                    p2_df[new_label] = selected_data.year
-                                elif time_feature == "month":
-                                    p2_df[new_label] = selected_data.month
-                                elif time_feature == "day":
-                                    p2_df[new_label] = selected_data.day
-                                elif time_feature == "day_name":
-                                    p2_df[new_label] = selected_data.day_name()
-                                elif time_feature == "Hour":
-                                    p2_df[new_label] = selected_data.hour + 1
-                                elif time_feature == "Minute":
-                                    p2_df[new_label] = selected_data.minute
-                                elif time_feature == "year_diff":
-                                    p2_df[new_label] = date.today().year - selected_data.year
-                                elif time_feature == "month_diff":
-                                    p2_df[new_label] = ((
-                                                                    date.today().year - selected_data.year) * 12 + date.today().month - selected_data.month)
+                                    # Kullanıcıya hangi özelliği türetmek istediğini dinamik olarak soralım
+                                    time_feature = fecol1.selectbox('Türetmek istediğiniz özelliği seçin:',
+                                                                    ['year', 'month', 'day', 'day_name', 'Hour', 'Minute',
+                                                                     'year_diff', 'month_diff'],
+                                                                    key=f'time_feature_{counter}')
 
-                                # Güncel DataFrame'i gösterelim
-                                fecol1.write(f"Yeni {new_label} değişkeni türetildi. Güncel DataFrame:")
-                                fecol1.write(p2_df)
+                                    # Seçilen özelliğe göre işlem yapalım
+                                    if time_feature == "year":
+                                        p2_df[new_label] = selected_data.dt.year
+                                    elif time_feature == "month":
+                                        p2_df[new_label] = selected_data.dt.month
+                                    elif time_feature == "day":
+                                        p2_df[new_label] = selected_data.dt.day
+                                    elif time_feature == "day_name":
+                                        p2_df[new_label] = selected_data.dt.day_name()
+                                    elif time_feature == "Hour":
+                                        p2_df[new_label] = selected_data.dt.hour
+                                    elif time_feature == "Minute":
+                                        p2_df[new_label] = selected_data.dt.minute
+                                    elif time_feature == "year_diff":
+                                        p2_df[new_label] = date.today().year - selected_data.dt.year
+                                    elif time_feature == "month_diff":
+                                        p2_df[new_label] = ((
+                                                                        date.today().year - selected_data.dt.year) * 12 + date.today().month - selected_data.dt.month)
 
-                                # Yeni eklenen değişkenin unique değer sayısını kontrol edelim
-                                unique_values = p2_df[new_label].unique()
-                                num_unique_values = len(unique_values)
+                                    # Güncel DataFrame'i gösterelim
+                                    fecol1.write(f"Yeni {new_label} değişkeni türetildi. Güncel DataFrame:")
+                                    fecol1.write(p2_df)
 
-                                if num_unique_values == 1:
-                                    # Tek unique değer varsa
-                                    fecol2.write(f"Tek unique değer bulunmaktadır: {unique_values[0]}")
-
-                                elif num_unique_values == 2:
-                                    # İki unique değer varsa proportions_ztest testi yapılacak
-                                    fecol2.write(f"İki unique değer bulunmaktadır. Değerler: {unique_values}")
-                                    # Hedef değişken için kullanıcıdan seçim alalım
-                                    # Hedef değişken için kullanıcıdan seçim alalım
-                                    fe_target_var = fecol2.selectbox('Hedef değişkeni seçin:', options=p2_df.columns,
-                                                                     key=f"fe_target_var_{counter}")
-
-                                    # Yeni eklenen değişkenin seçilen hedef değişken üzerindeki sonuçlarına bakalım
-                                    groupby_results = p2_df.groupby(new_label).agg({fe_target_var: "mean"})
-                                    fecol2.write("Yeni değişkenin hedef değişken üzerindeki etkisi (Ortalama):")
-                                    fecol2.write(groupby_results)
-
-                                    # İstatistiki analiz: Oranlar testi (proportions_ztest) tüm unique değerler için yapılacak
-                                    unique_values = p2_df[new_label].unique()
-
-                                    for value in unique_values:
-                                        count_1 = p2_df.loc[p2_df[new_label] == value, fe_target_var].sum()
-                                        count_0 = p2_df.loc[p2_df[new_label] != value, fe_target_var].sum()
-                                        nobs_1 = p2_df.loc[p2_df[new_label] == value, fe_target_var].shape[0]
-                                        nobs_0 = p2_df.loc[p2_df[new_label] != value, fe_target_var].shape[0]
-
-                                        if nobs_0 == 0 or nobs_1 == 0:  # Boş kümelerde test yapmamak için
-                                            fecol2.write(f"Yeterli veri yok: {value} için test yapılmadı.")
-                                            continue
-
-                                        test_stat, pvalue = proportions_ztest(count=[count_1, count_0],
-                                                                              nobs=[nobs_1, nobs_0])
-
-                                        fecol2.write(
-                                            f'{value} için Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
-                                        if pvalue < 0.05:
-                                            fecol2.write(
-                                                f"H0 hipotezi reddedildi: {value} ile hedef değişken arasında fark vardır.")
-                                        else:
-                                            fecol2.write(
-                                                f"H0 hipotezi reddedilemedi: {value} ile hedef değişken arasında fark yoktur.")
-
-                                elif num_unique_values > 2:
-                                    # İkiden fazla unique değer varsa ANOVA testi yapılacaktır yazısı gösterilecek
-                                    fecol2.write(
-                                        f"{num_unique_values} unique değer bulunmaktadır. ANOVA testi yapılacaktır.")
-
-
-
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg, cat_but_car_arg, "timedegturet")
 
                             #####################################################################
                             ##################   FEATURE EXTRACTION - NaN bool değişkeni türetmek
@@ -5858,59 +6244,28 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
 
                                 # Kullanıcıdan bir değişken seçmesini isteyelim
                                 selected_variable = fecol1.selectbox("NaN bool türetilecek değişkeni seçin:",
-                                                                   options=p2_df.columns,
-                                                                   key=f"nan_var_{counter}")
+                                                                     options=[""] + p2_df.columns,
+                                                                     key=f"nan_var_{counter}")
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                             key=f"nan_user_label_{counter}")
+                                if selected_variable:
 
-                                new_label = f"NEW_{user_label}"
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"nan_user_label_{counter}")
 
-                                # Yeni NaN bool değişkenini oluşturalım
-                                p2_df[new_label] = p2_df[selected_variable].notnull().astype(int)
+                                    new_label = f"NEW_{user_label}"
 
-                                # Güncel DataFrame'i gösterelim
-                                fecol1.write(f"NaN bool değişkeni türetildi. Güncel DataFrame:")
-                                fecol1.write(p2_df)
+                                    # Yeni NaN bool değişkenini oluşturalım
+                                    p2_df[new_label] = p2_df[selected_variable].notnull().astype(int)
 
-                                # Yeni oluşturulan sütunun unique değer sayısını kontrol edelim
-                                unique_values = p2_df[new_label].unique()
-                                num_unique_values = len(unique_values)
+                                    # Güncel DataFrame'i gösterelim
+                                    fecol1.write(
+                                        "**NaN bool değişkeni türetildi. Dolu değerler 1 iken Nan değerler 0 ile sembolize edilmiştir.**")
+                                    fecol1.write("Güncel DataFrame:")
+                                    fecol1.dataframe(p2_df, use_container_width=True)
 
-                                if num_unique_values == 1:
-                                    # Tek unique değer varsa işlem yapmayalım ve bilgi verelim
-                                    fecol2.write(
-                                        f"{new_label} değişkeninde tek unique değer bulunmaktadır, işlem yapılmadı.")
-
-                                elif num_unique_values == 2:
-                                    # İki unique değer varsa groupby ve proportions_ztest yapalım
-                                    fecol2.write(
-                                        f"{new_label} değişkeninde 2 unique değer bulunmaktadır. Groupby ve proportions test yapılacaktır.")
-
-                                    fe_target_var = fecol2.selectbox('Hedef değişkeni seçin:', options=p2_df.columns,
-                                                                     key=f"fe_target_var_{counter}")
-
-                                    # Yeni eklenen değişkenin seçilen hedef değişken üzerindeki sonuçlarına bakalım
-                                    groupby_results = p2_df.groupby(new_label).agg({fe_target_var: "mean"})
-                                    fecol2.write("Yeni değişkenin hedef değişken üzerindeki etkisi (Ortalama):")
-                                    fecol2.write(groupby_results)
-
-                                    # İstatistiki analiz: Oranlar testi (proportions_ztest)
-                                    count_1 = p2_df.loc[p2_df[new_label] == 1, fe_target_var].sum()
-                                    count_0 = p2_df.loc[p2_df[new_label] == 0, fe_target_var].sum()
-                                    nobs_1 = p2_df.loc[p2_df[new_label] == 1, fe_target_var].shape[0]
-                                    nobs_0 = p2_df.loc[p2_df[new_label] == 0, fe_target_var].shape[0]
-
-                                    test_stat, pvalue = proportions_ztest(count=[count_1, count_0],
-                                                                          nobs=[nobs_1, nobs_0])
-
-                                    fecol2.write(f'Test Stat = {test_stat:.4f}, p-value = {pvalue:.4f}')
-                                    if pvalue < 0.05:
-                                        fecol2.write(f"H0 hipotezi reddedildi: İki grup arasında fark vardır.")
-                                    else:
-                                        fecol2.write(f"H0 hipotezi reddedilemedi: İki grup arasında fark yoktur.")
-
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg, cat_but_car_arg, "nanbool")
 
 
                             ###########################################################################
@@ -5958,25 +6313,33 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                                                                                           cat_but_car_arg)
                                 ###########
 
+                                only_string = [col for col in p2_cat_cols + p2_cat_but_car if col not in p2_num_but_cat]
+
                                 # Kullanıcıdan bir değişken seçmesini isteyelim
                                 selected_variable = fecol1.selectbox(
                                     "Harf sayısı (boşluklar harf olarak değerlendirilir) türetilecek kategorik değişkeni seçin:",
-                                    options=p2_cat_cols + p2_cat_but_car, key=f"char_count_var_{counter}")
+                                    options=[""] + only_string, key=f"char_count_var_{counter}")
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                               key=f"char_count_user_label_{counter}")
-                                new_label = f"NEW_{user_label}"
+                                if selected_variable:
 
-                                # Seçilen kategorik değişkenin harf sayısı ile yeni değişkeni oluşturalım
-                                p2_df[new_label] = p2_df[selected_variable].str.len()
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"char_count_user_label_{counter}")
+                                    new_label = f"NEW_{user_label}"
 
-                                # Güncel DataFrame'i gösterelim
-                                fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
-                                fecol1.write(p2_df)
+                                    # Seçilen kategorik değişkenin harf sayısı ile yeni değişkeni oluşturalım
+                                    p2_df[new_label] = p2_df[selected_variable].str.len()
 
-                                # İşlem tamamlandı mesajını columns 2'ye yazdıralım
-                                fecol2.write("İşlem tamamlandı.")
+                                    # Güncel DataFrame'i gösterelim
+                                    fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
+                                    fecol1.write(p2_df)
+
+                                    # İşlem tamamlandı mesajını columns 2'ye yazdıralım
+                                    fecol2.write("İşlem tamamlandı.")
+
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg,
+                                                                     cat_but_car_arg, "harfsayisidegturet")
 
 
 
@@ -6026,24 +6389,33 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                                                                                           cat_but_car_arg)
                                 ###########
 
+                                only_string = [col for col in p2_cat_cols + p2_cat_but_car if col not in p2_num_but_cat]
+
+
                                 # Kullanıcıdan bir değişken seçmesini isteyelim
                                 selected_variable = fecol1.selectbox("Kelime sayısı türetilecek kategorik değişkeni seçin:",
-                                                                     options=p2_cat_cols + p2_cat_but_car, key=f"word_count_var_{counter}")
+                                                                     options=[""] + only_string, key=f"word_count_var_{counter}")
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                               key=f"word_count_user_label_{counter}")
-                                new_label = f"NEW_{user_label}"
+                                if selected_variable:
 
-                                # Seçilen kategorik değişkenin kelime sayısı ile yeni değişkeni oluşturalım
-                                p2_df[new_label] = p2_df[selected_variable].apply(lambda x: len(str(x).split(" ")))
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"word_count_user_label_{counter}")
+                                    new_label = f"NEW_{user_label}"
 
-                                # Güncel DataFrame'i gösterelim
-                                fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
-                                fecol1.write(p2_df)
+                                    # Seçilen kategorik değişkenin kelime sayısı ile yeni değişkeni oluşturalım
+                                    p2_df[new_label] = p2_df[selected_variable].apply(lambda x: len(str(x).split(" ")))
 
-                                # İşlem tamamlandı mesajını columns 2'ye yazdıralım
-                                fecol2.write("İşlem tamamlandı.")
+                                    # Güncel DataFrame'i gösterelim
+                                    fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
+                                    fecol1.write(p2_df)
+
+                                    # İşlem tamamlandı mesajını columns 2'ye yazdıralım
+                                    fecol2.write("İşlem tamamlandı.")
+
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg,
+                                                                     cat_but_car_arg, "kelimesayisidegturet")
 
 
 
@@ -6054,56 +6426,101 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                             elif selected_feature == "Belirli bir string ifade içerenlerle değişken türetmek":
 
                                 # Kategorik sütunlar, numerik sütunlar ve kategorik ancak kardinal olanları alalım
-                                p2_cat_cols, p2_num_cols, p2_cat_but_car, p2_num_but_cat = grab_col_names(p2_df)
+
+                                ###########
+                                q11, q12 = fecol1.columns(2)
+                                if numbutcat_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q11.write(f"Numeric but categoric argument is : {num_but_cat_arg}")
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    num_but_cat_arg = q11.number_input(
+                                        f"Enter a custom value for Numeric but Categoric Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=10,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"num_but_cat_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q11.write(f"Numeric but categoric argument is set to : {num_but_cat_arg}")
+                                ###
+                                if catbutcar_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q12.write(f"Categoric but cardinal argument is : {cat_but_car_arg}")
+
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    cat_but_car_arg = q12.number_input(
+                                        f"Enter a custom value for Categoric but Cardinal Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=20,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"cat_but_car_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q12.write(f"Categoric but Cardinal argument is set to : {cat_but_car_arg}")
+
+                                p2_cat_cols, p2_num_cols, p2_cat_but_car, p2_num_but_cat = grab_col_names(p2_df,
+                                                                                                          num_but_cat_arg,
+                                                                                                          cat_but_car_arg)
+                                ###########
+
+                                only_string = [col for col in p2_cat_cols + p2_cat_but_car if col not in p2_num_but_cat]
+
 
                                 # Kullanıcıdan bir değişken seçmesini isteyelim
                                 selected_variable = fecol1.selectbox(
                                     "String ifade türetilecek kategorik değişkeni seçin:",
-                                    options=p2_cat_cols + p2_cat_but_car, key=f"string_var_{counter}"
+                                    options=[""] + only_string, key=f"string_var_{counter}"
                                 )
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                               key=f"string_user_label_{counter}")
-                                new_label = f"NEW_{user_label}"
+                                if selected_variable:
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"string_user_label_{counter}")
+                                    new_label = f"NEW_{user_label}"
 
-                                # Kullanıcıdan aranan string ifadeyi alalım
-                                find_str = fecol1.text_input("Aradığınız string ifadesini girin:",
-                                                             key=f"find_str_{counter}")
+                                    # Kullanıcıdan aranan string ifadeyi alalım
+                                    find_str = fecol1.text_input("Aradığınız string ifadesini girin:",
+                                                                 key=f"find_str_{counter}")
 
-                                # Kullanıcıya üç seçenek sunalım
-                                match_type = fecol1.selectbox(
-                                    "Aradığınız string ifadenin nerede olmasını istiyorsunuz?",
-                                    options=["... ile başlayan", "... ile biten", "herhangi bir yerinde ... içeren"],
-                                    key=f"match_type_{counter}"
-                                )
-
-                                # Hedef değişkeni seçmesini isteyelim
-                                target_var = fecol2.selectbox("Hedef değişkeni seçin:", options=p2_df.columns,
-                                                              key=f"target_var_{counter}")
-
-                                # Seçilen match_type'a göre uygun işlemi yapalım
-                                if match_type == "... ile başlayan":
-                                    p2_df[new_label] = p2_df[selected_variable].apply(
-                                        lambda x: len([word for word in str(x).split() if word.startswith(find_str)])
-                                    )
-                                elif match_type == "... ile biten":
-                                    p2_df[new_label] = p2_df[selected_variable].apply(
-                                        lambda x: len([word for word in str(x).split() if word.endswith(find_str)])
-                                    )
-                                else:  # herhangi bir yerinde ... içeren
-                                    p2_df[new_label] = p2_df[selected_variable].apply(
-                                        lambda x: len([word for word in str(x).split() if find_str in word])
+                                    # Kullanıcıya üç seçenek sunalım
+                                    match_type = fecol1.selectbox(
+                                        "Aradığınız string ifadenin nerede olmasını istiyorsunuz?",
+                                        options=["... ile başlayan", "... ile biten", "herhangi bir yerinde ... içeren"],
+                                        key=f"match_type_{counter}"
                                     )
 
-                                # Güncel DataFrame'i gösterelim
-                                fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
-                                fecol1.write(p2_df)
+                                    # Hedef değişkeni seçmesini isteyelim
+                                    target_var = fecol2.selectbox("Hedef değişkeni seçin:", options=p2_df.columns,
+                                                                  key=f"target_var_{counter}")
 
-                                # Seçilen değişkene göre groupby işlemini yapalım
-                                groupby_results = p2_df.groupby(new_label).agg({target_var: ['mean', 'count']})
-                                fecol2.write(f"Yeni {new_label} değişkeninin grup ortalaması ve sayısı:")
-                                fecol2.write(groupby_results)
+                                    # Seçilen match_type'a göre uygun işlemi yapalım
+                                    if match_type == "... ile başlayan":
+                                        p2_df[new_label] = p2_df[selected_variable].apply(
+                                            lambda x: len([word for word in str(x).split() if word.startswith(find_str)])
+                                        )
+                                    elif match_type == "... ile biten":
+                                        p2_df[new_label] = p2_df[selected_variable].apply(
+                                            lambda x: len([word for word in str(x).split() if word.endswith(find_str)])
+                                        )
+                                    else:  # herhangi bir yerinde ... içeren
+                                        p2_df[new_label] = p2_df[selected_variable].apply(
+                                            lambda x: len([word for word in str(x).split() if find_str in word])
+                                        )
+
+                                    # Güncel DataFrame'i gösterelim
+                                    fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
+                                    fecol1.write(p2_df)
+
+                                    # Seçilen değişkene göre groupby işlemini yapalım
+                                    groupby_results = p2_df.groupby(new_label).agg({target_var: ['mean', 'count']})
+                                    fecol2.write(f"Yeni {new_label} değişkeninin grup ortalaması ve sayısı:")
+                                    fecol2.write(groupby_results)
+
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg,
+                                                                     cat_but_car_arg, "belirlirstricerendegturet")
 
 
 
@@ -6114,52 +6531,157 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                             elif selected_feature == "Regex ile metin analizi ile değişken türetmek":
 
                                 # Kategorik sütunlar, numerik sütunlar ve kategorik ancak kardinal olanları alalım
-                                p2_cat_cols, p2_num_cols, p2_cat_but_car, p2_num_but_cat = grab_col_names(p2_df)
+                                ###########
+                                q11, q12 = fecol1.columns(2)
+                                if numbutcat_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q11.write(f"Numeric but categoric argument is : {num_but_cat_arg}")
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    num_but_cat_arg = q11.number_input(
+                                        f"Enter a custom value for Numeric but Categoric Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=10,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"num_but_cat_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q11.write(f"Numeric but categoric argument is set to : {num_but_cat_arg}")
+                                ###
+                                if catbutcar_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q12.write(f"Categoric but cardinal argument is : {cat_but_car_arg}")
+
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    cat_but_car_arg = q12.number_input(
+                                        f"Enter a custom value for Categoric but Cardinal Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=20,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"cat_but_car_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q12.write(f"Categoric but Cardinal argument is set to : {cat_but_car_arg}")
+
+                                p2_cat_cols, p2_num_cols, p2_cat_but_car, p2_num_but_cat = grab_col_names(p2_df,
+                                                                                                          num_but_cat_arg,
+                                                                                                          cat_but_car_arg)
+                                ###########
+
+                                fecol1.button("Regex ile neler yapabilirim?", help="""Regex (Regular Expressions) ile string verilerinden çeşitli değişkenler türetmek oldukça esnek ve güçlü bir yaklaşımdır. İşte regex kullanarak stringlerden türetebileceğiniz bazı örnek değişkenler:
+
+### 1. **Email Domain Türetme**
+Bir e-posta adresinden domain kısmını ayırarak yeni bir değişken türetebilirsiniz.
+```python
+df['NEW_EMAIL_DOMAIN'] = df['Email'].str.extract(r'@([a-zA-Z0-9.-]+)', expand=False)
+```
+Bu kod, email adresindeki `@` işaretinden sonra gelen domain kısmını çeker.
+
+### 2. **Telefon Numaralarından Ülke Kodu Türetme**
+Telefon numaralarından uluslararası kodu (örneğin, +90) alarak bir değişken oluşturabilirsiniz.
+```python
+df['NEW_COUNTRY_CODE'] = df['PhoneNumber'].str.extract(r'(\+\d+)', expand=False)
+```
+Bu örnek, telefon numarasındaki `+` işaretiyle başlayan ülke kodunu yakalar.
+
+### 3. **Tarih Değişkeninden Yıl Türetme**
+Tarih formatındaki stringlerden sadece yılı çıkarmak için regex kullanabilirsiniz.
+```python
+df['NEW_YEAR'] = df['Date'].str.extract(r'(\d{4})', expand=False)
+```
+Bu kod, 4 haneli yılı tarih formatındaki stringden ayırır.
+
+### 4. **Dosya Adlarından Dosya Türü (Uzantı) Türetme**
+Dosya adlarından uzantı bilgisi almak için regex kullanılabilir.
+```python
+df['NEW_FILE_TYPE'] = df['FileName'].str.extract(r'\.([a-zA-Z0-9]+)$', expand=False)
+```
+Bu örnek, dosya adındaki son noktadan sonra gelen uzantıyı çeker (örneğin, `.pdf`, `.jpg`).
+
+### 5. **Metindeki İlk Büyük Harfli Kelimeyi Türetme**
+Bir metin içindeki ilk büyük harf ile başlayan kelimeyi yakalamak için aşağıdaki regex kullanılabilir.
+```python
+df['NEW_FIRST_CAPITALIZED'] = df['Text'].str.extract(r'\b([A-Z][a-z]+)\b', expand=False)
+```
+Bu örnek, metin içindeki ilk büyük harf ile başlayan kelimeyi ayıklar.
+
+### 6. **Adreslerden Posta Kodu Türetme**
+Adreslerden posta kodlarını almak için regex kullanabilirsiniz (örneğin, 5 basamaklı posta kodları için).
+```python
+df['NEW_POSTAL_CODE'] = df['Address'].str.extract(r'(\b\d{5}\b)', expand=False)
+```
+Bu kod, metindeki 5 basamaklı sayısal posta kodlarını ayıklar.
+
+### 7. **URL'den Domain Türetme**
+Bir URL'den domain kısmını almak için regex kullanabilirsiniz.
+```python
+df['NEW_URL_DOMAIN'] = df['URL'].str.extract(r'https?://(www\.)?([^/]+)', expand=False)[1]
+```
+Bu regex, URL'deki domain kısmını yakalar (örneğin, `https://www.example.com` için `example.com`).
+
+### 8. **Plaka Numaralarından Şehir Kodu Türetme**
+Araç plaka numaralarından ilk iki haneyi ayırarak şehir kodunu çıkarabilirsiniz.
+```python
+df['NEW_CITY_CODE'] = df['PlateNumber'].str.extract(r'(\b\d{2})', expand=False)
+```
+Bu örnek, plaka numarasındaki ilk iki rakamı alarak şehir kodunu elde eder.
+
+Bu tür regex temelli feature extraction yaklaşımları, string verilerinden anlamlı yeni değişkenler türetmek için sıkça kullanılır. Regex'in esnekliği sayesinde stringler üzerindeki desenler temel alınarak birçok farklı türde değişken oluşturulabilir.""")
+
+                                only_string = [col for col in p2_cat_cols + p2_cat_but_car if col not in p2_num_but_cat]
+
 
                                 # Kullanıcıdan bir değişken seçmesini isteyelim
                                 selected_variable = fecol1.selectbox(
-                                    "Regex ile analiz yapılacak kategorik değişkeni seçin:", options=p2_cat_cols + p2_cat_but_car,
+                                    "Regex ile analiz yapılacak kategorik değişkeni seçin:", options=[""] + only_string,
                                     key=f"regex_var_{counter}")
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                               key=f"regex_user_label_{counter}")
-                                new_label = f"NEW_{user_label}"
+                                if selected_variable:
 
-                                # Kullanıcıdan regex string ifadesi alalım, varsayılan olarak ([A-Za-z]+)\.
-                                extract_str = fecol1.text_input("Aradığınız regex ifadesini girin:",
-                                                                value=r"([A-Za-z]+)\.",
-                                                                key=f"extract_str_{counter}")
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"regex_user_label_{counter}")
+                                    new_label = f"NEW_{user_label}"
 
-                                # Hedef değişkeni seçmesini isteyelim
-                                target_var = fecol2.selectbox("Hedef değişkeni seçin:", options=p2_df.columns,
-                                                              key=f"target_var_{counter}")
+                                    # Kullanıcıdan regex string ifadesi alalım, varsayılan olarak ([A-Za-z]+)\.
+                                    extract_str = fecol1.text_input("Aradığınız regex ifadesini girin:",
+                                                                    value=r"([A-Za-z]+)\.",
+                                                                    key=f"extract_str_{counter}")
 
-                                # Seçilen değişkende regex ile eşleşen string'i çıkararak yeni değişkeni oluşturalım
-                                p2_df[new_label] = p2_df[selected_variable].str.extract(f"{extract_str}", expand=False)
+                                    # Hedef değişkeni seçmesini isteyelim
+                                    target_var = fecol2.selectbox("Hedef değişkeni seçin:", options=p2_df.columns,
+                                                                  key=f"target_var_{counter}")
 
-                                # Güncel DataFrame'i gösterelim
-                                fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
-                                fecol1.write(p2_df)
+                                    # Seçilen değişkende regex ile eşleşen string'i çıkararak yeni değişkeni oluşturalım
+                                    p2_df[new_label] = p2_df[selected_variable].str.extract(f"{extract_str}", expand=False)
 
-                                # Fonksiyonun çalışma mantığını açıklayan bilgilendirme ve kod bloğu
-                                explanation = """
-                                Bu fonksiyon regex ifadesine göre seçilen bir metin değişkeninden belirli bir desen (pattern) yakalamak ve bu desenle yeni bir değişken türetmek için kullanılır.
-                                Örneğin ([A-Za-z]+)\. regex ifadesi, harflerle başlayan ve nokta ile biten kelimeleri yakalar.
-                                Aşağıdaki kod bloğu bu işlemi nasıl gerçekleştirdiğini göstermektedir:
-                                """
-                                fecol2.write(explanation)
+                                    # Güncel DataFrame'i gösterelim
+                                    fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
+                                    fecol1.write(p2_df)
 
-                                # Kod bloğu
-                                code_block = f"""
-                                p2_df['{new_label}'] = p2_df['{selected_variable}'].str.extract(r"{extract_str}", expand=False)
-                                """
-                                fecol2.code(code_block, language='python')
+                                    # Fonksiyonun çalışma mantığını açıklayan bilgilendirme ve kod bloğu
+                                    explanation = """
+                                    Bu fonksiyon regex ifadesine göre seçilen bir metin değişkeninden belirli bir desen (pattern) yakalamak ve bu desenle yeni bir değişken türetmek için kullanılır.
+                                    Örneğin default regex ifadesi, harflerle başlayan ve nokta ile biten kelimeleri yakalar.
+                                    Aşağıdaki kod bloğu bu işlemi nasıl gerçekleştirdiğini göstermektedir:
+                                    """
+                                    fecol2.write(explanation)
 
-                                # Seçilen değişkene göre groupby işlemini yapalım
-                                groupby_results = p2_df.groupby(new_label).agg({target_var: ['count', 'mean']})
-                                fecol2.write(f"Yeni {new_label} değişkeninin grup ortalaması ve sayısı:")
-                                fecol2.write(groupby_results)
+                                    # Kod bloğu
+                                    code_block = f"""
+                                    p2_df['{new_label}'] = p2_df['{selected_variable}'].str.extract(r"{extract_str}", expand=False)
+                                    """
+                                    fecol2.code(code_block, language='python')
+
+                                    # Seçilen değişkene göre groupby işlemini yapalım
+                                    groupby_results = p2_df.groupby(new_label).agg({target_var: ['count', 'mean']})
+                                    fecol2.write(f"Yeni {new_label} değişkeninin grup ortalaması ve sayısı:")
+                                    fecol2.write(groupby_results)
+
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg,
+                                                                     cat_but_car_arg, "regexledegturet")
 
 
                             ####################################################################################
@@ -6167,11 +6689,54 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                             ####################################################################################
 
                             elif selected_feature == "Nümerik değişkeni bilinen sınırlara bölerek değişken türetmek":
+
+                                # Kategorik sütunlar, numerik sütunlar ve kategorik ancak kardinal olanları alalım
+                                ###########
+                                q11, q12 = fecol1.columns(2)
+                                if numbutcat_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q11.write(f"Numeric but categoric argument is : {num_but_cat_arg}")
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    num_but_cat_arg = q11.number_input(
+                                        f"Enter a custom value for Numeric but Categoric Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=10,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"num_but_cat_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q11.write(f"Numeric but categoric argument is set to : {num_but_cat_arg}")
+                                ###
+                                if catbutcar_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q12.write(f"Categoric but cardinal argument is : {cat_but_car_arg}")
+
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    cat_but_car_arg = q12.number_input(
+                                        f"Enter a custom value for Categoric but Cardinal Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=20,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"cat_but_car_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q12.write(f"Categoric but Cardinal argument is set to : {cat_but_car_arg}")
+
+                                p2_cat_cols, p2_num_cols, p2_cat_but_car, p2_num_but_cat = grab_col_names(p2_df,
+                                                                                                          num_but_cat_arg,
+                                                                                                          cat_but_car_arg)
+                                ###########
+
+
                                 # Kullanıcıdan bir adet nümerik değişken seçmesini isteyelim
-                                selected_numerical_var = fecol1.selectbox("Bir nümerik değişken seçin:",
-                                                                          options=p2_df.select_dtypes(
-                                                                              include=np.number).columns.tolist(),
-                                                                          key=f"numerical_var_{counter}")
+                                selected_numerical_var = fecol1.selectbox(
+                                    "Bir nümerik değişken seçin:",
+                                    options=[""] + p2_num_cols,  # Boş bir seçenek ekleniyor
+                                    key=f"numerical_var_{counter}"
+                                )
+
 
                                 # Seçilen numerik değişkenin deskriptif tablosunu gösterelim
                                 if selected_numerical_var:
@@ -6181,102 +6746,103 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                     # Transpoze işleminden önce tabloyu DataFrame'e çevir ve satırları sütunlara dönüştür
                                     descriptive_stats_df = pd.DataFrame(descriptive_stats).transpose()
 
-                                    fecol2.write(
+                                    fecol1.write(
                                         f"'{selected_numerical_var}' değişkeni için betimleyici istatistikler (yatay tablo):")
 
                                     # Tablonun genişliği ve hücre yüksekliklerini içeriğe göre otomatik ayarlamak için st.dataframe() kullan
-                                    fecol2.dataframe(descriptive_stats_df)
+                                    fecol1.dataframe(descriptive_stats_df)
 
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                               key=f"boundary_user_label_{counter}")
-                                new_label = f"NEW_{user_label}"
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"boundary_user_label_{counter}")
+                                    new_label = f"NEW_{user_label}"
 
-                                # Kullanıcıya isteğe bağlı olarak başka bir değişken (nümerik veya kategorik) seçip bu değişkeni kullanarak filtreleme yapmak isteyip istemediğini soralım
-                                add_filter = fecol1.checkbox("Başka bir değişkenle filtreleme yapmak ister misiniz?",
-                                                             key=f"add_filter_{counter}")
+                                    # Kullanıcıya isteğe bağlı olarak başka bir değişken (nümerik veya kategorik) seçip bu değişkeni kullanarak filtreleme yapmak isteyip istemediğini soralım
+                                    add_filter = fecol1.checkbox("Başka bir değişkenle filtreleme yapmak ister misiniz?",
+                                                                 key=f"add_filter_{counter}")
 
-                                if add_filter:
-                                    # 4 sütunlu bir düzen oluşturalım: filtre, min, max, kategorik değer
-                                    num_rows = fecol1.number_input("Kaç kategorik sınıfa bölmek istiyorsunuz?",
-                                                                   min_value=1,
-                                                                   step=1, key=f"num_rows_{counter}")
-                                    filter_conditions = []
+                                    if add_filter:
+                                        # 4 sütunlu bir düzen oluşturalım: filtre, min, max, kategorik değer
+                                        num_rows = fecol1.number_input("Kaç kategorik sınıfa bölmek istiyorsunuz?",
+                                                                       min_value=1,
+                                                                       step=1, key=f"num_rows_{counter}")
+                                        filter_conditions = []
 
-                                    for i in range(int(num_rows)):
-                                        col1, col2, col3, col4, col5 = st.columns(
-                                            5)  # 4 kolon oluştur: Filtre, Min, Max, Kategorik Değer
+                                        for i in range(int(num_rows)):
+                                            col1, col2, col3, col4, col5 = fecol1.columns(
+                                                5)  # 4 kolon oluştur: Filtre, Min, Max, Kategorik Değer
 
-                                        # Filtreleme yapmak istediğiniz değişkeni ve koşulu girin
-                                        with col1:
-                                            selected_filter_var = col1.selectbox(f"Filtreleme için değişken {i + 1}:",
-                                                                                 options=p2_df.columns.tolist(),
-                                                                                 key=f"filter_var_{i}_{counter}")
-                                            filter_value = col2.text_input(
-                                                f"Filter {i + 1} ('male' or '> / < / == / >= / <= 50'):",
-                                                key=f"filter_value_{i}_{counter}")
+                                            # Filtreleme yapmak istediğiniz değişkeni ve koşulu girin
+                                            with col1:
+                                                selected_filter_var = col1.selectbox(f"Filtreleme için değişken {i + 1}:",
+                                                                                     options=p2_df.columns.tolist(),
+                                                                                     key=f"filter_var_{i}_{counter}")
+                                                filter_value = col2.text_input(
+                                                    f"Filter {i + 1} ('male' or '> / < / == / >= / <= 50'):",
+                                                    key=f"filter_value_{i}_{counter}")
 
-                                        # Min-Max değerleri girin
-                                        with col3:
-                                            min_value = col3.number_input(f"Min (excluded) (Sınıf {i + 1})",
-                                                                          key=f"min_val_{i}_{counter}")
-                                        with col4:
-                                            max_value = col4.number_input(f"Max (included) (Sınıf {i + 1})",
-                                                                          key=f"max_val_{i}_{counter}")
+                                            # Min-Max değerleri girin
+                                            with col3:
+                                                min_value = col3.number_input(f"Min (excluded) (Sınıf {i + 1}):",
+                                                                              key=f"min_val_{i}_{counter}")
+                                            with col4:
+                                                max_value = col4.number_input(f"Max (included) (Sınıf {i + 1}):",
+                                                                              key=f"max_val_{i}_{counter}")
 
-                                        # Kategorik değer girin
-                                        with col5:
-                                            class_label = col5.text_input(f"Kategorik Değer {i + 1}",
-                                                                          key=f"class_val_{i}_{counter}")
+                                            # Kategorik değer girin
+                                            with col5:
+                                                class_label = col5.text_input(f"Yazılacak kategorik Değer: {i + 1}",
+                                                                              key=f"class_val_{i}_{counter}")
 
-                                        # Koşulları bir listeye ekleyelim
-                                        if filter_value.startswith(
-                                                (">", "<", "==", ">=", "<=")):  # Sayısal bir koşul ise
-                                            filter_condition = f"(p2_df['{selected_filter_var}'] {filter_value})"
-                                        else:  # Kategorik bir koşul (örn. 'male')
-                                            filter_condition = f"(p2_df['{selected_filter_var}'] == '{filter_value}')"
+                                            # Koşulları bir listeye ekleyelim
+                                            if filter_value.startswith(
+                                                    (">", "<", "==", ">=", "<=")):  # Sayısal bir koşul ise
+                                                filter_condition = f"(p2_df['{selected_filter_var}'] {filter_value})"
+                                            else:  # Kategorik bir koşul (örn. 'male')
+                                                filter_condition = f"(p2_df['{selected_filter_var}'] == '{filter_value}')"
 
-                                        filter_conditions.append((filter_condition, min_value, max_value, class_label))
+                                            filter_conditions.append((filter_condition, min_value, max_value, class_label))
 
-                                    # Sınıfları uygulayalım
-                                    for condition, min_val, max_val, class_val in filter_conditions:
-                                        # Eğer ek filtre varsa koşul o filtreyle birlikte uygulanacak
-                                        p2_df.loc[(p2_df[selected_numerical_var] > min_val) & (
-                                                p2_df[selected_numerical_var] <= max_val) & eval(
-                                            condition), new_label] = class_val
+                                        # Sınıfları uygulayalım
+                                        for condition, min_val, max_val, class_val in filter_conditions:
+                                            # Eğer ek filtre varsa koşul o filtreyle birlikte uygulanacak
+                                            p2_df.loc[(p2_df[selected_numerical_var] > min_val) & (
+                                                    p2_df[selected_numerical_var] <= max_val) & eval(
+                                                condition), new_label] = class_val
 
-                                else:
-                                    # 3 sütunlu bir düzen: Min, Max ve Kategorik Değer
-                                    num_classes = fecol1.number_input("Kaç kategorik sınıfa bölmek istiyorsunuz?",
-                                                                      min_value=1, step=1, key=f"num_classes_{counter}")
-                                    for i in range(int(num_classes)):
-                                        col1, col2, col3 = st.columns(3)  # 3 kolon oluştur: Min, Max, Kategorik Değer
+                                    else:
+                                        # 3 sütunlu bir düzen: Min, Max ve Kategorik Değer
+                                        num_classes = fecol1.number_input("Kaç kategorik sınıfa bölmek istiyorsunuz?",
+                                                                          min_value=1, step=1, key=f"num_classes_{counter}")
+                                        for i in range(int(num_classes)):
+                                            col1, col2, col3 = fecol1.columns(3)  # 3 kolon oluştur: Min, Max, Kategorik Değer
 
-                                        # Min-Max ve Kategorik Değerleri girin
-                                        with col1:
-                                            min_value = col1.number_input(f"Min (excluded) (Sınıf {i + 1})",
-                                                                          key=f"min_val_no_filter_{i}_{counter}")
-                                        with col2:
-                                            max_value = col2.number_input(f"Max (included) (Sınıf {i + 1})",
-                                                                          key=f"max_val_no_filter_{i}_{counter}")
-                                        with col3:
-                                            class_label = col3.text_input(f"Kategorik Değer {i + 1}",
-                                                                          key=f"class_val_no_filter_{i}_{counter}")
+                                            # Min-Max ve Kategorik Değerleri girin
+                                            with col1:
+                                                min_value = col1.number_input(f"Min (excluded) (Sınıf {i + 1})",
+                                                                              key=f"min_val_no_filter_{i}_{counter}")
+                                            with col2:
+                                                max_value = col2.number_input(f"Max (included) (Sınıf {i + 1})",
+                                                                              key=f"max_val_no_filter_{i}_{counter}")
+                                            with col3:
+                                                class_label = col3.text_input(f"Kategorik Değer {i + 1}",
+                                                                              key=f"class_val_no_filter_{i}_{counter}")
 
-                                        # Koşulları uygulayalım
-                                        p2_df.loc[(p2_df[selected_numerical_var] > min_value) & (
-                                                p2_df[selected_numerical_var] <= max_value), new_label] = class_label
+                                            # Koşulları uygulayalım
+                                            p2_df.loc[(p2_df[selected_numerical_var] > min_value) & (
+                                                    p2_df[selected_numerical_var] <= max_value), new_label] = class_label
 
-                                # Güncel DataFrame'i gösterelim
-                                st.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
-                                st.write(p2_df)
+                                    # Güncel DataFrame'i gösterelim
+                                    fecol1.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
+                                    fecol1.write(p2_df)
 
-                                # İşlem tamamlandı mesajını columns 2'ye yazdıralım
-                                fecol2.write(
-                                    "İşlem tamamlandı. Sınırlara göre kategorik değişken başarıyla oluşturuldu.")
+                                    # İşlem tamamlandı mesajını columns 2'ye yazdıralım
+                                    fecol2.write(
+                                        "İşlem tamamlandı. Sınırlara göre kategorik değişken başarıyla oluşturuldu.")
 
-
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg, cat_but_car_arg, "nudebisıbo")
 
 
                             ######################################################################################
@@ -6284,10 +6850,50 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                             ######################################################################################
 
                             elif selected_feature == "Nümerik değişkeni çeyreklik sınırlara bölerek değişken türetmek":
+
+
+                                # Kategorik sütunlar, numerik sütunlar ve kategorik ancak kardinal olanları alalım
+                                ###########
+                                q11, q12 = fecol1.columns(2)
+                                if numbutcat_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q11.write(f"Numeric but categoric argument is : {num_but_cat_arg}")
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    num_but_cat_arg = q11.number_input(
+                                        f"Enter a custom value for Numeric but Categoric Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=10,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"num_but_cat_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q11.write(f"Numeric but categoric argument is set to : {num_but_cat_arg}")
+                                ###
+                                if catbutcar_process_stage == "Yes":
+                                    # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                                    q12.write(f"Categoric but cardinal argument is : {cat_but_car_arg}")
+
+                                else:
+                                    # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                                    cat_but_car_arg = q12.number_input(
+                                        f"Enter a custom value for Categoric but Cardinal Argument {counter}:",
+                                        min_value=1,  # Minimum değer
+                                        value=20,  # Varsayılan başlangıç değeri
+                                        step=1,
+                                        key=f"cat_but_car_arg_{counter}"
+                                        # Benzersiz key her defasında farklı olur
+                                    )
+                                    q12.write(f"Categoric but Cardinal argument is set to : {cat_but_car_arg}")
+
+                                p2_cat_cols, p2_num_cols, p2_cat_but_car, p2_num_but_cat = grab_col_names(p2_df,
+                                                                                                          num_but_cat_arg,
+                                                                                                          cat_but_car_arg)
+                                ###########
+
                                 # Kullanıcıdan bir adet nümerik değişken seçmesini isteyelim
                                 selected_numerical_var = fecol1.selectbox("Bir nümerik değişken seçin:",
-                                                                          options=p2_df.select_dtypes(
-                                                                              include=np.number).columns.tolist(),
+                                                                          options=[""] + p2_num_cols,
                                                                           key=f"numerical_var_{counter}")
 
                                 # Seçilen numerik değişkenin deskriptif tablosunu gösterelim
@@ -6298,116 +6904,119 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                     # Transpoze edilmiş tabloyu gösterelim ve genişlik/yükseklik hücrelere göre ayarlansın
                                     descriptive_stats_df = pd.DataFrame(descriptive_stats).transpose()
 
-                                    fecol2.write(
+                                    fecol1.write(
                                         f"'{selected_numerical_var}' değişkeni için betimleyici istatistikler (yatay tablo):")
-                                    fecol2.dataframe(descriptive_stats_df)  # Dinamik boyutlu tablo
-                                    
+                                    fecol1.dataframe(descriptive_stats_df)  # Dinamik boyutlu tablo
 
-                                # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
-                                user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
-                                                               key=f"boundary_user_label_{counter}")
-                                new_label = f"NEW_{user_label}"
 
-                                # Kullanıcıya birden fazla filtreleme yapma seçeneği sunalım
-                                add_filter = fecol1.checkbox("Başka bir değişkenle filtreleme yapmak ister misiniz?",
-                                                             key=f"add_filter_{counter}")
+                                    # Kullanıcıdan türetilecek yeni değişkenin label ismini alalım
+                                    user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
+                                                                   key=f"boundary_user_label_{counter}")
+                                    new_label = f"NEW_{user_label}"
 
-                                if add_filter:
-                                    num_filters = fecol1.number_input("Kaç filtre eklemek istiyorsunuz?", min_value=1,
-                                                                      step=1, key=f"num_filters_{counter}")
-                                    filter_conditions = []
+                                    # Kullanıcıya birden fazla filtreleme yapma seçeneği sunalım
+                                    add_filter = fecol1.checkbox("Başka bir değişkenle filtreleme yapmak ister misiniz?",
+                                                                 key=f"add_filter_{counter}")
 
-                                    # Filtre koşullarını toplayalım
-                                    for i in range(int(num_filters)):
-                                        filter_col1, filter_col2, filter_col3 = st.columns(
-                                            3)  # Her filtre için üç sütun: değişken, koşul, önek
-                                        with filter_col1:
-                                            selected_filter_var = filter_col1.selectbox(
-                                                f"Filtreleme yapmak istediğiniz değişken {i + 1}:",
-                                                options=p2_df.columns.tolist(), key=f"filter_var_{i}_{counter}")
-                                        with filter_col2:
-                                            filter_value = filter_col2.text_input(
-                                                f"{selected_filter_var} için filtre değeri girin (örn. 'male' veya '>= 50'):",
-                                                key=f"filter_value_{i}_{counter}")
-                                        with filter_col3:
-                                            filter_prefix = filter_col3.text_input(
-                                                f"{selected_filter_var} için önek girin (örn. 'female_'):",
-                                                key=f"filter_prefix_{i}_{counter}")
+                                    if add_filter:
+                                        num_filters = fecol1.number_input("Kaç filtre eklemek istiyorsunuz?", min_value=1,
+                                                                          step=1, key=f"num_filters_{counter}")
+                                        filter_conditions = []
 
-                                        # Koşulun doğru oluşturulması
-                                        if filter_value.startswith(
-                                                (">", "<", "==", ">=", "<=")):  # Sayısal bir koşul ise
-                                            filter_condition = f"(p2_df['{selected_filter_var}'] {filter_value})"
-                                        else:  # Kategorik bir koşul (örn. 'male')
-                                            filter_condition = f"(p2_df['{selected_filter_var}'] == '{filter_value}')"
+                                        # Filtre koşullarını toplayalım
+                                        for i in range(int(num_filters)):
+                                            filter_col1, filter_col2, filter_col3 = st.columns(
+                                                3)  # Her filtre için üç sütun: değişken, koşul, önek
+                                            with filter_col1:
+                                                selected_filter_var = filter_col1.selectbox(
+                                                    f"Filtreleme yapmak istediğiniz değişken {i + 1}:",
+                                                    options=p2_df.columns.tolist(), key=f"filter_var_{i}_{counter}")
+                                            with filter_col2:
+                                                filter_value = filter_col2.text_input(
+                                                    f"{selected_filter_var} için filtre değeri girin (örn. 'male' veya '>= 50'):",
+                                                    key=f"filter_value_{i}_{counter}")
+                                            with filter_col3:
+                                                filter_prefix = filter_col3.text_input(
+                                                    f"{selected_filter_var} için önek girin (örn. 'female_'):",
+                                                    key=f"filter_prefix_{i}_{counter}")
 
-                                        filter_conditions.append(
-                                            (selected_filter_var, filter_value, filter_condition, filter_prefix))
+                                            # Koşulun doğru oluşturulması
+                                            if filter_value.startswith(
+                                                    (">", "<", "==", ">=", "<=")):  # Sayısal bir koşul ise
+                                                filter_condition = f"(p2_df['{selected_filter_var}'] {filter_value})"
+                                            else:  # Kategorik bir koşul (örn. 'male')
+                                                filter_condition = f"(p2_df['{selected_filter_var}'] == '{filter_value}')"
 
-                                    combined_filter_results = pd.Series([None] * len(p2_df), index=p2_df.index)
+                                            filter_conditions.append(
+                                                (selected_filter_var, filter_value, filter_condition, filter_prefix))
 
-                                    # Her filtre için işlemleri birleştirerek tek bir sütuna aktaralım
-                                    for i, (filter_var, filter_val, condition, prefix) in enumerate(filter_conditions):
-                                        # Filtrelenmiş dataframe oluştur
-                                        filtered_df = p2_df.loc[eval(condition)]
+                                        combined_filter_results = pd.Series([None] * len(p2_df), index=p2_df.index)
 
-                                        # Filtrelenmiş verinin boş olup olmadığını kontrol edelim
-                                        if filtered_df.empty:
-                                            fecol2.write(
-                                                f"Filtreleme sonrası '{filter_var}' ile '{filter_val}' koşulu sonucu boş bir veri seti oluştu.")
-                                        else:
-                                            # Çeyrek sınırlara göre qcut kullanarak kategorik değişken türetelim
-                                            num_classes = 4  # Çeyreklik dilimleri 4'e bölelim
-                                            quartile_labels = ['1. Çeyrek', '2. Çeyrek', '3. Çeyrek', '4. Çeyrek']
+                                        # Her filtre için işlemleri birleştirerek tek bir sütuna aktaralım
+                                        for i, (filter_var, filter_val, condition, prefix) in enumerate(filter_conditions):
+                                            # Filtrelenmiş dataframe oluştur
+                                            filtered_df = p2_df.loc[eval(condition)]
 
-                                            # `qcut` işlemi ve sınırların yakalanması
-                                            filtered_qcut, bin_edges = pd.qcut(filtered_df[selected_numerical_var],
-                                                                               q=num_classes, labels=quartile_labels,
-                                                                               retbins=True)
+                                            # Filtrelenmiş verinin boş olup olmadığını kontrol edelim
+                                            if filtered_df.empty:
+                                                fecol1.write(
+                                                    f"Filtreleme sonrası '{filter_var}' ile '{filter_val}' koşulu sonucu boş bir veri seti oluştu.")
+                                            else:
+                                                # Çeyrek sınırlara göre qcut kullanarak kategorik değişken türetelim
+                                                num_classes = 4  # Çeyreklik dilimleri 4'e bölelim
+                                                quartile_labels = ['1. Çeyrek', '2. Çeyrek', '3. Çeyrek', '4. Çeyrek']
 
-                                            # Sınırları ekrana yazdıralım
-                                            fecol2.write(
-                                                f"{filter_var} ile {filter_val} koşulu sonucu {new_label} için qcut sınırları: {bin_edges}")
+                                                # `qcut` işlemi ve sınırların yakalanması
+                                                filtered_qcut, bin_edges = pd.qcut(filtered_df[selected_numerical_var],
+                                                                                   q=num_classes, labels=quartile_labels,
+                                                                                   retbins=True)
 
-                                            # Her çeyrek için gözlem sayısını yazdıralım
-                                            for quartile in quartile_labels:
-                                                count_in_quartile = (filtered_qcut == quartile).sum()
-                                                fecol2.write(f"{quartile}: {count_in_quartile} gözlem")
+                                                # Sınırları ekrana yazdıralım
+                                                fecol1.write(
+                                                    f"{filter_var} ile {filter_val} koşulu sonucu {new_label} için qcut sınırları: {bin_edges}")
 
-                                            # Kullanıcının tanımladığı önek ile qcut sonuçlarını birleştirelim
-                                            filtered_qcut_with_prefix = prefix + filtered_qcut.astype(str)
+                                                # Her çeyrek için gözlem sayısını yazdıralım
+                                                for quartile in quartile_labels:
+                                                    count_in_quartile = (filtered_qcut == quartile).sum()
+                                                    fecol1.write(f"{quartile}: {count_in_quartile} gözlem")
 
-                                            # Filtre sonuçlarını birleştirip tek sütuna aktaralım
-                                            combined_filter_results.loc[filtered_df.index] = filtered_qcut_with_prefix
+                                                # Kullanıcının tanımladığı önek ile qcut sonuçlarını birleştirelim
+                                                filtered_qcut_with_prefix = prefix + filtered_qcut.astype(str)
 
-                                    # Orijinal dataframe'e yeni sütunu ekleyelim
-                                    p2_df[new_label] = combined_filter_results
+                                                # Filtre sonuçlarını birleştirip tek sütuna aktaralım
+                                                combined_filter_results.loc[filtered_df.index] = filtered_qcut_with_prefix
 
-                                else:
-                                    # Çeyrek sınırlara göre qcut kullanarak kategorik değişken türetelim
-                                    num_classes = 4  # Çeyreklik dilimleri 4'e bölelim
-                                    quartile_labels = ['1. Çeyrek', '2. Çeyrek', '3. Çeyrek', '4. Çeyrek']
+                                        # Orijinal dataframe'e yeni sütunu ekleyelim
+                                        p2_df[new_label] = combined_filter_results
 
-                                    # `qcut` işlemi ve sınırların yakalanması
-                                    p2_df[new_label], bin_edges = pd.qcut(p2_df[selected_numerical_var], q=num_classes,
-                                                                          labels=quartile_labels, retbins=True)
+                                    else:
+                                        # Çeyrek sınırlara göre qcut kullanarak kategorik değişken türetelim
+                                        num_classes = 4  # Çeyreklik dilimleri 4'e bölelim
+                                        quartile_labels = ['1. Çeyrek', '2. Çeyrek', '3. Çeyrek', '4. Çeyrek']
 
-                                    # Sınırları ekrana yazdıralım
-                                    fecol2.write(f"{new_label} için qcut sınırları: {bin_edges}")
+                                        # `qcut` işlemi ve sınırların yakalanması
+                                        p2_df[new_label], bin_edges = pd.qcut(p2_df[selected_numerical_var], q=num_classes,
+                                                                              labels=quartile_labels, retbins=True)
 
-                                    # Her çeyrek için gözlem sayısını yazdıralım
-                                    for quartile in quartile_labels:
-                                        count_in_quartile = (p2_df[new_label] == quartile).sum()
-                                        fecol2.write(f"{quartile}: {count_in_quartile} gözlem")
+                                        # Sınırları ekrana yazdıralım
+                                        fecol1.write(f"{new_label} için qcut sınırları: {bin_edges}")
 
-                                # Güncel DataFrame'i gösterelim
-                                st.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
-                                st.write(p2_df)
+                                        # Her çeyrek için gözlem sayısını yazdıralım
+                                        for quartile in quartile_labels:
+                                            count_in_quartile = (p2_df[new_label] == quartile).sum()
+                                            fecol1.write(f"{quartile}: {count_in_quartile} gözlem")
 
-                                # İşlem tamamlandı mesajını columns 2'ye yazdıralım
-                                fecol2.write(
-                                    "İşlem tamamlandı. Çeyreklik sınırlara göre kategorik değişken başarıyla oluşturuldu.")
+                                    # Güncel DataFrame'i gösterelim
+                                    st.write(f"{new_label} değişkeni türetildi. Güncel DataFrame:")
+                                    st.write(p2_df)
 
+                                    # İşlem tamamlandı mesajını columns 2'ye yazdıralım
+                                    fecol1.write(
+                                        "İşlem tamamlandı. Çeyreklik sınırlara göre kategorik değişken başarıyla oluşturuldu.")
+
+                                    with fecol2:
+                                        perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg,
+                                                                     cat_but_car_arg, "nudeqcutbol")
 
 
                             ###################################################################
@@ -6416,8 +7025,10 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
 
                             if selected_feature == "Koşullu matematiksel operasyonlar ile değişken türetmek":
                                 # Kullanıcıdan kaç koşul gireceğini soralım
-                                num_conditions = st.number_input("Kaç adet koşul girmek istiyorsunuz?", min_value=1,
+                                num_conditions = fecol1.number_input("Kaç adet koşul girmek istiyorsunuz?", min_value=1,
                                                                  max_value=10, step=1, key="num_conditions")
+
+                                fecol1.write("**DİKKAT!** Eğer None değer var ise girdiğiniz koşul ne olursa olsun None değeri false olarak görecektir ve False için girdiğiniz değeri yazdırmış olacaksınız! 1'den fazla koşul girerseniz de nan yazmaktadır! Önce eksik değerleri gözden geçirin!")
 
                                 # Kullanıcıdan yeni değişken ismi alalım (NEW_ otomatik olarak eklenecek)
                                 user_label = fecol1.text_input(f'Türetilecek yeni değişken için bir isim girin (NEW_):',
@@ -6427,29 +7038,36 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                 # Koşul, true ve false değerlerini alalım
                                 conditions = []
                                 for i in range(num_conditions):
-                                    fecol1, fecol2, fecol3 = st.columns(3)
-
-                                    with fecol1:
-                                        condition = st.text_input(
-                                            f"{i + 1}. Koşul girin (örn. '(p2_df[\"SibSp\"] + p2_df[\"Parch\"]) > 0')",
-                                            key=f"condition_{counter}_{i}")
-
                                     if num_conditions == 1:
+                                        ofecol1, ofecol2, ofecol3 = fecol1.columns(3)
+
+                                        with ofecol1:
+                                            condition = st.text_input(
+                                                f"{i + 1}. Koşul girin (örn. '(p2_df[\"SibSp\"] + p2_df[\"Parch\"]) > 0')",
+                                                key=f"condition_{counter}_{i}")
+
                                         # Eğer tek koşul varsa True ve False değerlerini ayrı ayrı alalım
-                                        with fecol2:
-                                            true_value = fecol2.text_input(
+                                        with ofecol2:
+                                            true_value = ofecol2.text_input(
                                                 f"{i + 1}. Koşul doğruysa (True) verilecek değer:",
                                                 key=f"true_value_{counter}_{i}")
-                                        with fecol3:
-                                            false_value = fecol3.text_input(
+                                        with ofecol3:
+                                            false_value = ofecol3.text_input(
                                                 f"{i + 1}. Koşul yanlışsa (False) verilecek değer:",
                                                 key=f"false_value_{counter}_{i}")
                                         conditions.append((condition, true_value, false_value))
 
                                     elif num_conditions > 1:
+                                        ofecol1, ofecol2 = fecol1.columns(2)
+
+                                        with ofecol1:
+                                            condition = st.text_input(
+                                                f"{i + 1}. Koşul girin (örn. '(p2_df[\"SibSp\"] + p2_df[\"Parch\"]) > 0')",
+                                                key=f"condition_{counter}_{i}")
+
                                         # Eğer birden fazla koşul varsa her koşul için tek bir değer alalım
-                                        with fecol2:
-                                            result_value = fecol2.text_input(f"{i + 1}. Koşul için verilecek değer:",
+                                        with ofecol2:
+                                            result_value = ofecol2.text_input(f"{i + 1}. Koşul için verilecek değer:",
                                                                              key=f"result_value_{counter}_{i}")
                                         # Her koşul için kullanıcıdan birer adet değer alıyoruz
                                         conditions.append((condition, result_value, result_value))
@@ -6469,17 +7087,21 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                                 p2_df.loc[eval(cond[0]), new_label] = cond[1]
 
                                         # Güncel DataFrame'i gösterelim
-                                        st.write(f"Yeni {new_label} değişkeni türetildi. Güncel DataFrame:")
-                                        st.write(p2_df)
+                                        fecol1.write(f"Yeni {new_label} değişkeni türetildi. Güncel DataFrame:")
+                                        fecol1.write(p2_df)
 
                                         # İşlem tamamlandı mesajını columns 2'ye yazdıralım
                                         fecol2.write(f"{new_label} değişkeni başarıyla türetildi.")
+
+                                        with fecol2:
+                                            perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg,
+                                                                         cat_but_car_arg, "kosulludegiskenturet")
+
 
                                     except Exception as e:
                                         st.error(f"Hata oluştu: {str(e)}")
                                 else:
                                     st.warning("Lütfen koşul, true değer ve false değer alanlarını doldurun.")
-
 
 
                             ##################################################################################
@@ -6517,6 +7139,10 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
                                         # İşlem tamamlandı mesajını columns 2'ye yazdıralım
                                         fecol2.write(f"{new_label} değişkeni başarıyla türetildi.")
 
+                                        with fecol2:
+                                            perform_statistical_analysis(p2_df, new_label, counter, num_but_cat_arg,
+                                                                         cat_but_car_arg, "numdegozelliketkilesme")
+
                                     except SyntaxError as se:
                                         st.error(f"Sözdizimi hatası: {str(se)}. Girdiğiniz kodu kontrol edin.")
                                     except Exception as e:
@@ -6538,12 +7164,2077 @@ Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizi
 
 
 
+                ##################################################################################################################
+                ############################ POST-OVERVIEW ÜST TABI
+                ##################################################################################################################
+
+                df = p2_df.copy()
+
+                # Tabları oluştur
+                post_tab1, post_tab2, post_vtab1, post_vtab2, post_vtab3, post_vtab4, post_vtab5  = post_overview_tab.tabs(["User Inputs","Data Structure", "Variable Analysis", "Variable Analysis on Target Variable", "Conditional Selection",
+                         "Measurement Problems", "Correlation Matrix"])
+
+                ###########################################################################
+                ################ POST-OVERVIEW ÜST TABI - User Input bölümü
+                ###########################################################################
+
+
+                with post_tab1:
+
+
+                    st.write("eğer kullanıcı post'ta da aynı değeri kullan dememişse buradan değer girmesini isticez.")
+
+                    ###########
+                    q11, q12 = post_tab1.columns(2)
+                    if numbutcat_post_overview_stage == "Yes":
+                        # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                        q11.write(f"Numeric but categoric argument is : {num_but_cat_arg}")
+                    else:
+                        # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                        num_but_cat_arg = q11.number_input(
+                            f"Enter a custom value for Numeric but Categoric Argument {counter}:",
+                            min_value=1,  # Minimum değer
+                            value=10,  # Varsayılan başlangıç değeri
+                            step=1,
+                            key=f"num_but_cat_arg_{counter}"
+                            # Benzersiz key her defasında farklı olur
+                        )
+                        q11.write(f"Numeric but categoric argument is set to : {num_but_cat_arg}")
+                    ###
+                    if catbutcar_post_overview_stage == "Yes":
+                        # Eğer kullanıcı 'Yes' seçerse, p2_df üzerinde grab_col_names fonksiyonu çağrılır
+                        q12.write(f"Categoric but cardinal argument is : {cat_but_car_arg}")
+
+                    else:
+                        # Kullanıcıdan num_but_cat_arg değerini benzersiz key ile isteme
+                        cat_but_car_arg = q12.number_input(
+                            f"Enter a custom value for Categoric but Cardinal Argument {counter}:",
+                            min_value=1,  # Minimum değer
+                            value=20,  # Varsayılan başlangıç değeri
+                            step=1,
+                            key=f"cat_but_car_arg_{counter}"
+                            # Benzersiz key her defasında farklı olur
+                        )
+                        q12.write(f"Categoric but Cardinal argument is set to : {cat_but_car_arg}")
+
+                    p2_cat_cols, p2_num_cols, p2_cat_but_car, p2_num_but_cat = grab_col_names(p2_df,
+                                                                                              num_but_cat_arg,
+                                                                                              cat_but_car_arg)
+                    ###########
+
+                ###########################################################################
+                ################ POST-OVERVIEW ÜST TABI - Data Structure bölümü
+                ###########################################################################
+
+
+                ##########
+                post_ocol1, post_ocol2 = post_tab2.columns([1, 1])
+
+                #overview_tab.subheader("DataFrame Shape")
+
+                with post_tab2.expander("Rows in the Dataset"):
+                    post_col1, post_col2 = st.columns([1, 1])
+                    with post_col1:
+                        st.markdown("**First 5 rows**")
+                        st.write(df.head())
+                    with post_col2:
+                        st.markdown("**Last 5 rows**")
+                        st.write(df.tail())
+
+                with post_tab2.expander("FULL Dataset"):
+                    st.write(df)
+
+                # Veri çerçevesinin şekli
+                with post_ocol1.expander("Shape of the Dataset"):
+                    st.write(f"**Rows:** {df.shape[0]}")
+                    st.write(f"**Columns/Variables:** {df.shape[1]}")
+
+                # Veri türleri (Transpoze edilmiş tablo)
+                with post_ocol1.expander("Data Types"):
+                    post_dtypes_df = pd.DataFrame(df.dtypes, columns=['Data Type'])
+                    post_dtypes_df.index.name = 'Column'
+                    st.dataframe(post_dtypes_df.T, use_container_width=False)  # İçeriğe göre ayarlama yapılır
+
+                # Index bilgileri
+                with post_ocol1.expander("Index Information"):
+                    post_index_info = pd.DataFrame({
+                        'Index Name': [df.index.name if df.index.name else 'None'],
+                        'Index Type': [type(df.index).__name__],
+                        'Index Values': [list(df.index)]
+                    })
+                    st.dataframe(post_index_info, use_container_width=False)  # İçeriğe göre ayarlama yapılır
+
+                # Veri setinin genelinde eksik değer sorgusu yapma
+                with post_ocol2.expander("Missing Values in Dataset (if any)"):
+                    post_has_na_values = df.isnull().values.any()
+                    st.write(f"Any Missing Values: {'Yes' if post_has_na_values else 'No'}")
+
+                # Eksik değerler (Transpoze edilmiş tablo)
+                with post_ocol2.expander("The Amount of Missing Values in Each Variable (if any)"):
+                    post_missing_values_df = pd.DataFrame(df.isnull().sum(), columns=['Missing Values'])
+                    post_missing_values_df.index.name = 'Column'
+                    st.dataframe(post_missing_values_df.T,
+                                           use_container_width=False)  # İçeriğe göre ayarlama yapılır
+
+                # Deskriptif istatistikler
+                with post_ocol2.expander("Quantiles and Descriptive Statistics"):
+                    # Yüzdelik dilimlerini kullanıcıdan al
+                    post_quantiles_options = [0, 0.01, 0.05, 0.10, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75, 0.80, 0.90, 0.95, 0.99, 1]
+                    post_user_quantiles = st.multiselect(
+                        "Select quantiles to display:",
+                        options=post_quantiles_options,
+                        default=[0, 0.25, 0.50, 0.75, 1],
+                        key="post_user_quantiles"
+                    )
+
+                    # Kullanıcının seçtiği veya varsayılan yüzdelik dilimlerine göre istatistikleri hesapla
+                    if not post_user_quantiles:
+                        post_user_quantiles = [0, 0.25, 0.50, 0.75, 1]  # Varsayılan yüzdelik dilimleri
+
+                    post_quantiles = df.describe(percentiles=post_user_quantiles).T
+                    st.dataframe(post_quantiles, use_container_width=False)  # İçeriğe göre ayarlama yapılır
+                ##########
+
+
+                with post_tab2:  # Overview Tab
+                    with st.expander("DataFrame for Identifying the Arguments to Detect Categorical and Numerical Variables in User Inputs tab!"):
+
+                        # Veri Çerçevesi Özeti Tablosunu Oluştur
+                        post_df_summary = get_column_summary(df)
+
+                        # Tabloyu Transpoze Et
+                        post_df_summary_transposed = post_df_summary.T
+
+                        # Tabloyu Streamlit ile Göster
+                        st.dataframe(post_df_summary_transposed, use_container_width=True)
 
 
 
+                ###########################################################################
+                ################ POST-OVERVIEW ÜST TABI - Analysis bölümü
+                ###########################################################################
+
+                with ((post_vtab1)):  # Diğer Tab
+
+
+                    post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df, num_but_cat_arg, cat_but_car_arg)
+
+
+                    ####################################
+                    ################ POST-OVERVIEW ÜST TABI -  Analysis bölümü - Variable Analysis Alt tabı
+                    ####################################
+
+                    with post_vtab1:  # Variable Analysis
+
+                        st.button("Click for the glossary terms!",
+                                  help="""#Categorical but cardinal variable:
+                                It refers to a categorical variable in a dataset that has a large number of unique categories, making it somewhat similar to a continuous variable in terms of its uniqueness. These variables are technically categorical because their values represent discrete categories or groups, but they behave almost like numerical variables because the number of unique categories (or levels) is very high.
+                                #Numeric but categorical variable:
+                                It refers to a variable that consists of numeric values but functions as a categorical variable due to its limited number of unique values or its specific role in the analysis. Despite being stored as numeric data types, these variables represent discrete categories rather than continuous measurements.""",
+                                  key="post_glossary_button")
+
+                        post_vcol1, post_vcol2, post_vcol3 = post_vtab1.columns([1, 2, 3])
+
+                        post_vcol1.markdown(f"Observation(s): {df.shape[0]}")
+                        post_vcol1.markdown(f"Variable(s): {df.shape[1]}")
+                        post_vcol2.markdown(f'Categoric but cardinal variable(s): {len(post_cat_but_car)}')
+                        post_vcol2.markdown(f'Numeric but categoric variable(s): {len(post_num_but_cat)}')
+                        post_vcol3.markdown(f'**Numerical variable(s):** {len(post_num_cols)}')
+                        post_vcol3.markdown(
+                            f'**Categoric variables (incl. numeric but categoric variable(s)):** {len(post_cat_cols)}')
+
+
+                        ##########
+                        ### POST-OVERVIEW ÜST TABI -  Analysis bölümü - Variable Analysis Alt tabı - Analysis of Categorical Variable(s) expander
+                        ##########
+
+                        post_show_categorical_analysis = post_vtab1.checkbox("1- Show Analysis of Categorical Variables", key="post_show_categorical_analysis")
+                        if post_show_categorical_analysis:
+
+
+                            post_vtab1.header("Analysis of Categorical Variable(s)")
+
+                            if post_cat_cols:  # post_cat_cols boş değilse
+                                with post_vtab1:
+                                    with post_vtab1.expander("Detected Categorical Variables:"):
+                                        post_numcat_cols = len(post_cat_cols)
+                                        post_max_cols = 6  # Maximum number of columns per row
+                                        post_num_rows = (
+                                                           post_numcat_cols + post_max_cols - 1) // post_max_cols  # Calculate number of rows needed
+
+                                        for row in range(post_num_rows):
+                                            post_cols = st.columns(min(post_max_cols,
+                                                                  post_numcat_cols - row * post_max_cols))  # Create columns for the current row
+                                            for i, col in enumerate(post_cat_cols[row * post_max_cols:(row + 1) * post_max_cols]):
+                                                post_cols[i % len(post_cols)].write(
+                                                    col)  # Distribute columns across the created columns
+                                        else:
+                                            pass
+
+                                    with post_vtab1.expander("Detected Categorical but Cardinal Variables:"):
+                                        post_numcatbutcar_cols = len(post_cat_but_car)
+                                        post_max2_cols = 6  # Maximum number of columns per row
+                                        post_num2_rows = (
+                                                           post_numcatbutcar_cols + post_max2_cols - 1) // post_max2_cols  # Calculate number of rows needed
+
+                                        for row in range(post_num2_rows):
+                                            post_cols = st.columns(min(post_max2_cols,
+                                                                  post_numcatbutcar_cols - row * post_max2_cols))  # Create columns for the current row
+                                            for i, col in enumerate(post_cat_but_car[row * post_max2_cols:(row + 1) * post_max2_cols]):
+                                                post_cols[i % len(post_cols)].write(
+                                                    col)  # Distribute columns across the created columns
+                                        else:
+                                            pass
+
+                                    with post_vtab1.expander("Detected Numerical but Categorical Variables:"):
+                                        post_numnumbutcat_cols = len(post_num_but_cat)
+                                        post_max3_cols = 6  # Maximum number of columns per row
+                                        post_num3_rows = (
+                                                           post_numnumbutcat_cols + post_max3_cols - 1) // post_max3_cols  # Calculate number of rows needed
+
+                                        for row in range(post_num3_rows):
+                                            post_cols = st.columns(min(post_max3_cols,
+                                                                  post_numnumbutcat_cols - row * post_max3_cols))  # Create columns for the current row
+                                            for i, col in enumerate(post_num_but_cat[row * post_max3_cols:(row + 1) * post_max3_cols]):
+                                                post_cols[i % len(post_cols)].write(
+                                                    col)  # Distribute columns across the created columns
+                                        else:
+                                            pass
+
+
+                                post_vtab1.subheader("Table Summary")
+                                # Kolon başına kaç adet sütun olacağı
+                                post_cols_per_row = 4
+
+                                # Kolon sayısını hesapla
+                                post_total_cols = len(post_cat_cols)
+
+                                # Kolonları satırlara bölelim
+                                post_num_rows = (post_total_cols + post_cols_per_row - 1) // post_cols_per_row
+
+                                # Her bir satıra kolonları ekleyin
+                                for row in range(post_num_rows):
+                                    # O satır için kolonları oluştur
+                                    post_columns = post_vtab1.columns(post_cols_per_row)
+
+                                    # Satırdaki her kolon için içerik ekleyin
+                                    for col_index in range(post_cols_per_row):
+                                        # Kolon indeksini hesaplayın
+                                        post_col_pos = row * post_cols_per_row + col_index
+
+                                        # Kolon sayısının sınırını kontrol edin
+                                        if post_col_pos < post_total_cols:
+                                            post_col_name = post_cat_cols[post_col_pos]
+                                            with post_columns[col_index]:
+                                                with st.expander(f'Summary of {post_col_name}'):
+                                                    # Display summaries for each categorical column
+                                                    cat_summary(df, post_col_name)
+
+                                post_vtab1.subheader("Graph Summary")
+                                # Kolon başına kaç adet sütun olacağı
+                                post_cols_per_row = 4
+
+                                # Kolon sayısını hesapla
+                                post_total_cols = len(post_cat_cols)
+
+                                # Kolonları satırlara bölelim
+                                post_num_rows = (post_total_cols + post_cols_per_row - 1) // post_cols_per_row
+
+                                # Her bir satıra kolonları ekleyin
+                                for row in range(post_num_rows):
+                                    # O satır için kolonları oluştur
+                                    post_columns = post_vtab1.columns(post_cols_per_row)
+
+                                    # Satırdaki her kolon için içerik ekleyin
+                                    for col_index in range(post_cols_per_row):
+                                        # Kolon indeksini hesaplayın
+                                        post_col_pos = row * post_cols_per_row + col_index
+
+                                        # Kolon sayısının sınırını kontrol edin
+                                        if post_col_pos < post_total_cols:
+                                            post_col_name = post_cat_cols[post_col_pos]
+
+                                            # Check if the column has only NaN values
+                                            if df[post_col_name].isna().sum() == len(df[post_col_name]):
+                                                # If all values are NaN, display a message
+                                                with post_columns[col_index]:
+                                                    st.warning(f"The column '{post_col_name}' contains only NaN values.")
+                                                continue  # Skip to the next column
+
+                                            with post_columns[col_index]:
+                                                with st.expander(f'Summary of {post_col_name}'):
+                                                    # Display summaries for each categorical column
+                                                    cat_summary_plot(df, post_col_name, plot=True)
+                            else:
+                                post_vtab1.write("No categorical columns to display.")
+
+                        ##########
+                        ### POST-OVERVIEW ÜST TABI -  Analysis bölümü - Variable Analysis Alt tabı - Analysis of Numerical Variable(s) expander
+                        ##########
+                        post_show_numerical_analysis = post_vtab1.checkbox(" 2- Show Analysis of Numerical Variables", key="post_show_numerical_analysis")
+                        if post_show_numerical_analysis:
+
+                            post_vtab1.header("Analysis of Numerical Variable(s)")
+
+                            if post_num_cols:  # post_num_cols boş değilse
+                                with post_vtab1:
+                                    with post_vtab1.expander("Detected Numerical Variables:"):
+                                        post_numnum_cols = len(post_num_cols)
+                                        post_max_cols = 6  # Maximum number of columns per row
+                                        post_num_rows = (
+                                                           post_numnum_cols + post_max_cols - 1) // post_max_cols  # Calculate number of rows needed
+
+                                        for row in range(post_num_rows):
+                                            post_cols = st.columns(min(post_max_cols,
+                                                                  post_numnum_cols - row * post_max_cols))  # Create columns for the current row
+                                            for i, col in enumerate(post_num_cols[row * post_max_cols:(row + 1) * post_max_cols]):
+                                                post_cols[i % len(post_cols)].write(
+                                                    col)  # Distribute columns across the created columns
+                                        else:
+                                            pass
+
+                                post_vtab1.subheader("Descriptive Summary Table")
+                                # Kolon başına kaç adet sütun olacağı
+                                post_cols_per_row = 4
+
+                                # Kolon sayısını hesapla
+                                post_total_cols = len(post_num_cols)
+
+                                # Kolonları satırlara bölelim
+                                post_num_rows = (post_total_cols + post_cols_per_row - 1) // post_cols_per_row
+
+                                # Her bir satıra kolonları ekleyin
+                                for row in range(post_num_rows):
+                                    # O satır için kolonları oluştur
+                                    post_columns = post_vtab1.columns(post_cols_per_row)
+
+                                    # Satırdaki her kolon için içerik ekleyin
+                                    for col_index in range(post_cols_per_row):
+                                        # Kolon indeksini hesaplayın
+                                        post_col_pos = row * post_cols_per_row + col_index
+
+                                        # Kolon sayısının sınırını kontrol edin
+                                        if post_col_pos < post_total_cols:
+                                            post_col_name = post_num_cols[post_col_pos]
+                                            with post_columns[col_index]:
+                                                with st.expander(f'Summary of {post_col_name}'):
+                                                    # Display summaries for each categorical column
+                                                    num_summary(df, post_col_name)
+
+                                post_vtab1.subheader("Histogram Graphs")
+                                # Kolon başına kaç adet sütun olacağı
+                                post_cols_per_row = 4
+
+                                # Kolon sayısını hesapla
+                                post_total_cols = len(post_num_cols)
+
+                                # Kolonları satırlara bölelim
+                                post_num_rows = (post_total_cols + post_cols_per_row - 1) // post_cols_per_row
+
+                                # Her bir satıra kolonları ekleyin
+                                for row in range(post_num_rows):
+                                    # O satır için kolonları oluştur
+                                    post_columns = post_vtab1.columns(post_cols_per_row)
+
+                                    # Satırdaki her kolon için içerik ekleyin
+                                    for col_index in range(post_cols_per_row):
+                                        # Kolon indeksini hesaplayın
+                                        post_col_pos = row * post_cols_per_row + col_index
+
+                                        # Kolon sayısının sınırını kontrol edin
+                                        if post_col_pos < post_total_cols:
+                                            post_col_name = post_num_cols[post_col_pos]
+                                            with post_columns[col_index]:
+                                                with st.expander(f'Summary of {post_col_name}'):
+                                                    # Display summaries for each categorical column
+                                                    num_summary_plot(df, post_col_name, plot=True)
+                            else:
+                                post_vtab1.write("No numerical columns to display.")
+
+                    ####################################
+                    ################ POST-OVERVIEW ÜST TABI - Analysis bölümü - Target Variable Analysis alt tabı
+                    ####################################
+                    with post_vtab2:  # Target Variable Analysis
+
+                        post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                          num_but_cat_arg,
+                                                                                                          cat_but_car_arg)
+
+                        # Section to choose whether to display the categorical variable analysis
+                        post_show_cattarget_analysis = post_vtab2.checkbox("Show Variable Analysis on Target Variables",
+                                                                           key="post_show_cattarget_analysis")
+
+                        if post_show_cattarget_analysis:
+                            st.session_state.target_var = df.columns[0]  # Varsayılan olarak ilk sütunu seç
+
+                            post_target_var = post_vtab2.selectbox(
+                                '*Choose a target variable*',
+                                df.columns,
+                                index=df.columns.get_loc(st.session_state.target_var),
+                                key="post_target_var_select"
+                            )
+
+                            # Seçilen hedef değişkeni güncelle
+                            st.session_state.target_var = post_target_var
+
+                            # Seçimi göstermek için
+                            post_vtab2.write(f"*Selected target variable: **{st.session_state.target_var}***")
+
+                        if post_show_cattarget_analysis:
+                            ##########
+                            ### POST-OVERVIEW ÜST TABI -  Analysis bölümü - Variable Analysis on Target Variable Alt tabı - Function expander
+                            ##########
+                            with post_vtab2.expander("Function"):
+                                st.markdown(
+                                    """
+                                    **Function:** 
+    
+                                    ```python
+                                    #function
+                                    def target_summary_with_num(dataframe, target, numerical_col):
+                                        print(dataframe.groupby(target).agg({numerical_col: "mean"}), end="\\n\\n\\n")
+                                    #loop
+                                    for col in num_cols:
+                                        target_summary_with_num(df, "survived", col)
+                                    ```
+                                    """
+                                )
+
+                            ##########
+                            ### POST-OVERVIEW ÜST TABI -  Analysis bölümü - Variable Analysis on Target Variable Alt tabı - The Analysis of Categorical Variables on Target Variable expander
+                            ##########
+                            with post_vtab2.expander("The Analysis of Categorical Variables on Target Variable"):
+                                target_summary_with_cat(df, post_target_var, post_cat_cols)
+
+                            ##########
+                            ### POST-OVERVIEW ÜST TABI -  Analysis bölümü - Variable Analysis on Target Variable Alt tabı - The Analysis of Numerical Variables on Target Variable expander
+                            ##########
+                            with post_vtab2.expander("The Analysis of Numerical Variables on Target Variable"):
+                                target_summary_with_num(df, post_target_var, post_num_cols)
+
+                    ####################################
+                    ################ POST-OVERVIEW ÜST TABI - Analysis bölümü - Conditional Selection alt tabı
+                    ####################################
+                    with post_vtab3:  # Target Variable Analysis
+                        post_cacounter = 1
+                        while True:
+                            # Expandable section başlatma
+                            with st.expander(f"Analysis {post_cacounter}", expanded=True):
+                                # Analiz türünü seçtir
+                                post_ca_analysis_type = st.selectbox(
+                                    f"Select the type of analysis for Analysis {post_cacounter}",
+                                    [
+                                        "Hiçbir işlem yapmak istemiyorum",
+                                        "Distribution Analysis",
+                                        "Groupby",
+                                        "Bar Plot",
+                                        "Boxplot",
+                                        "Violin Plot",
+                                        "Histogram",
+                                        "KDE Plot",
+                                        "Bivariate Boxplot",
+                                        "Scatter Plot",
+                                        "Regression Line Plot",
+                                        "Crosstab",
+                                        "Frequency Table",
+                                        "Stacked Bar Plot",
+                                        "Pairwise Categorical Relationship",
+                                        "Joint Plot",
+                                        "Mosaic Plot",
+                                        "Pivot Table",
+                                        "Variance and Standard Deviation",
+                                        "Steamgraph",
+                                        "Zaman Serisi İçeren Verisetlerinde Analiz"
+                                    ],
+                                    key=f"post_ca_analysis_type_{post_cacounter}"
+                                )
+
+                                # Eğer "Hiçbir işlem yapmak istemiyorum" seçilirse bu döngüde işlem yapılmayacak
+                                if post_ca_analysis_type == "Hiçbir işlem yapmak istemiyorum":
+                                    st.write("Bu analizde işlem yapılmadı.")
+
+                                ### kategorik ve nümerik columns'ların tespiti
+                                post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                                  num_but_cat_arg,
+                                                                                                                  cat_but_car_arg)
+                                post_categorical_cols = post_cat_cols
+                                post_numeric_cols = post_num_cols
+
+                                ###########################
+                                ### Distribution Analysis
+                                ###########################
+                                if post_ca_analysis_type == "Distribution Analysis":
+                                    post_ca_selected_numeric = st.selectbox(
+                                        f"Select a numeric column for conditional analysis (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_ca_selected_numeric_{post_cacounter}"
+                                    )
+
+                                    post_ca_selected_categorical = st.selectbox(
+                                        f"Select a categorical column for grouping (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_ca_selected_categorical_{post_cacounter}"
+                                    )
+
+                                    # Koşul seçimi: Büyüktür, Küçüktür, veya Arasında
+                                    post_ca_condition_type = st.radio(
+                                        f"How would you like to apply the condition for the numeric column? (Analysis {post_cacounter})",
+                                        options=["Greater than (included)", "Less than (included)",
+                                                 "Between (both included)"],
+                                        key=f"post_ca_condition_type_{post_cacounter}"
+                                    )
+
+                                    # Kullanıcının seçimine göre threshold değerini belirle
+                                    if post_ca_condition_type == "Greater than (included)":
+                                        post_ca_threshold_value = st.slider(
+                                            f"Select threshold for {post_ca_selected_numeric} (Greater than (included)) (Analysis {post_cacounter})",
+                                            min_value=float(df[post_ca_selected_numeric].min()),
+                                            max_value=float(df[post_ca_selected_numeric].max()),
+                                            value=float(df[post_ca_selected_numeric].median()),
+                                            key=f"post_ca_threshold_value_{post_cacounter}"
+                                        )
+
+                                        # Filtreleme: Büyüktür koşulu
+                                        post_ca_filtered_df = df[df[post_ca_selected_numeric] >= post_ca_threshold_value]
+
+                                    elif post_ca_condition_type == "Less than (included)":
+                                        post_ca_threshold_value = st.slider(
+                                            f"Select threshold for {post_ca_selected_numeric} (Less than (included)) (Analysis {post_cacounter})",
+                                            min_value=float(df[post_ca_selected_numeric].min()),
+                                            max_value=float(df[post_ca_selected_numeric].max()),
+                                            value=float(df[post_ca_selected_numeric].median()),
+                                            key=f"post_ca_threshold_value_{post_cacounter}"
+                                        )
+
+                                        # Filtreleme: Küçüktür koşulu
+                                        post_ca_filtered_df = df[df[post_ca_selected_numeric] <= post_ca_threshold_value]
+
+                                    elif post_ca_condition_type == "Between (both included)":
+                                        # İki threshold değeri almak
+                                        post_ca_threshold_min = st.slider(
+                                            f"Select minimum threshold for {post_ca_selected_numeric} (Analysis {post_cacounter})",
+                                            min_value=float(df[post_ca_selected_numeric].min()),
+                                            max_value=float(df[post_ca_selected_numeric].max()),
+                                            value=float(df[post_ca_selected_numeric].min()),
+                                            key=f"post_ca_threshold_min_{post_cacounter}"
+                                        )
+
+                                        post_ca_threshold_max = st.slider(
+                                            f"Select maximum threshold for {post_ca_selected_numeric} (Analysis {post_cacounter})",
+                                            min_value=float(df[post_ca_selected_numeric].min()),
+                                            max_value=float(df[post_ca_selected_numeric].max()),
+                                            value=float(df[post_ca_selected_numeric].max()),
+                                            key=f"post_ca_threshold_max_{post_cacounter}"
+                                        )
+
+                                        # Filtreleme: Arasında koşulu
+                                        post_ca_filtered_df = df[(df[post_ca_selected_numeric] >= post_ca_threshold_min) & (
+                                                df[post_ca_selected_numeric] <= post_ca_threshold_max)]
+
+                                    # Kategorik değişken için seçimler
+                                    post_unique_categories = df[post_ca_selected_categorical].unique().tolist()
+                                    post_ca_selected_categories = st.multiselect(
+                                        f"Select categories for {post_ca_selected_categorical} (Analysis {post_cacounter})",
+                                        options=post_unique_categories,
+                                        default=post_unique_categories,
+                                        key=f"post_ca_selected_categories_{post_cacounter}"
+                                    )
+
+                                    # Filtrelenmiş veriyi kategorik değişkenlere göre filtrele
+                                    post_ca_filtered_df = post_ca_filtered_df[
+                                        post_ca_filtered_df[post_ca_selected_categorical].isin(post_ca_selected_categories)]
+
+                                    # Kullanıcının görmek istediği diğer değişkenleri seçmesini sağla
+                                    post_ca_other_columns = st.multiselect(
+                                        "Select other columns for groupby (exclude numeric column)",
+                                        options=post_categorical_cols,
+                                        key=f"post_ca_other_columns_{post_cacounter}"
+                                    )
+
+                                    if post_ca_other_columns:
+                                        # Groupby işlemi (sayısal değişken hariç)
+                                        st.subheader("Grouped Data with Counts and Percentages")
+                                        post_grouped_data = post_ca_filtered_df.groupby(
+                                            post_ca_other_columns).size().reset_index(
+                                            name='Count')
+                                        post_grouped_data['Percentage'] = (post_grouped_data['Count'] / post_grouped_data[
+                                            'Count'].sum()) * 100
+                                        st.write(post_grouped_data)
+                                    else:
+                                        # Filtrelenmiş veriyi göster
+                                        st.subheader(f"Filtered Data for Analysis {post_cacounter}:")
+                                        st.write(
+                                            post_ca_filtered_df[[post_ca_selected_numeric, post_ca_selected_categorical]])
+
+                                    # Grafiksel gösterimler
+                                    st.subheader(f"Visualizations for Analysis {post_cacounter}")
+
+                                    # Sayısal değişkenin dağılımı
+                                    post_fig1, post_ax1 = plt.subplots(figsize=(10, 5))
+                                    sns.histplot(data=post_ca_filtered_df, x=post_ca_selected_numeric,
+                                                 hue=post_ca_selected_categorical,
+                                                 multiple="stack", ax=post_ax1)
+                                    post_ax1.set_title(
+                                        f"Distribution of {post_ca_selected_numeric} by {post_ca_selected_categorical}")
+                                    st.pyplot(post_fig1)
+
+                                    # Kategorik değişkene göre sayısal değişkenin ortalamasını gösteren bar grafiği
+                                    st.subheader(
+                                        f"Mean of {post_ca_selected_numeric} by {post_ca_selected_categorical} for Analysis {post_cacounter}")
+                                    post_mean_values = post_ca_filtered_df.groupby(post_ca_selected_categorical)[
+                                        post_ca_selected_numeric].mean().reset_index()
+
+                                    post_fig2, post_ax2 = plt.subplots(figsize=(10, 5))
+                                    sns.barplot(x=post_ca_selected_categorical, y=post_ca_selected_numeric,
+                                                data=post_mean_values, ax=post_ax2)
+                                    post_ax2.set_title(f"Mean {post_ca_selected_numeric} by {post_ca_selected_categorical}")
+                                    st.pyplot(post_fig2)
+
+                                    # Özet Bilgiler
+                                    st.subheader(f"Summary of Filtered Data for Analysis {post_cacounter}")
+                                    st.write(f"Number of rows after filtering: {post_ca_filtered_df.shape[0]}")
+                                    st.write(f"Mean {post_ca_selected_numeric} by {post_ca_selected_categorical}:")
+                                    st.write(post_mean_values)
+
+                                ###########################
+                                ### Groupby
+                                ###########################
+                                if post_ca_analysis_type == "Groupby":
+                                    post_ca_selected_numeric = st.selectbox(
+                                        f"Select a numeric column for aggregation (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_groupby_numeric_{post_cacounter}"
+                                    )
+
+                                    post_ca_selected_categorical = st.selectbox(
+                                        f"Select a categorical column for grouping (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_groupby_categorical_{post_cacounter}"
+                                    )
+
+                                    post_ca_other_columns = st.multiselect(
+                                        "Select additional categorical columns for groupby (optional):",
+                                        options=post_categorical_cols,
+                                        key=f"post_groupby_other_cols_{post_cacounter}"
+                                    )
+
+                                    # Seçilen kategorik değişkenler ile gruplama işlemi
+                                    groupby_columns = [
+                                                          post_ca_selected_categorical] + post_ca_other_columns if post_ca_other_columns else [
+                                        post_ca_selected_categorical]
+
+                                    # Gruplama ve mean, median hesaplama
+                                    post_grouped_data = df.groupby(groupby_columns)[post_ca_selected_numeric].agg(
+                                        ['mean', 'median']).reset_index()
+
+                                    # Sonuçları göster
+                                    st.subheader(
+                                        f"Grouped Data by {groupby_columns} for {post_ca_selected_numeric} (Analysis {post_cacounter})")
+                                    st.write(post_grouped_data)
+
+                                ###########################
+                                ### Bar Plot
+                                ###########################
+                                elif post_ca_analysis_type == "Bar Plot":
+                                    post_selected_categorical = st.selectbox(
+                                        f"Select a categorical column for bar plot (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_bar_plot_cat_{post_cacounter}"
+                                    )
+
+                                    post_fig, post_ax = plt.subplots()
+                                    sns.countplot(x=df[post_selected_categorical], ax=post_ax)
+                                    post_ax.set_title(f"Bar Plot of {post_selected_categorical}")
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Boxplot
+                                ###########################
+                                elif post_ca_analysis_type == "Boxplot":
+                                    post_selected_categorical = st.selectbox(
+                                        f"Select a categorical column (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_box_cat_{post_cacounter}"
+                                    )
+                                    post_selected_numeric = st.selectbox(
+                                        f"Select a numeric column (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_box_num_{post_cacounter}"
+                                    )
+
+                                    post_fig, post_ax = plt.subplots(figsize=(10, 5))
+                                    sns.boxplot(x=post_selected_categorical, y=post_selected_numeric, data=df, ax=post_ax)
+                                    post_ax.set_title(f"Boxplot of {post_selected_numeric} by {post_selected_categorical}")
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Violin Plot
+                                ###########################
+                                elif post_ca_analysis_type == "Violin Plot":
+                                    post_selected_categorical = st.selectbox(
+                                        f"Select a categorical column (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_violin_cat_{post_cacounter}"
+                                    )
+                                    post_selected_numeric = st.selectbox(
+                                        f"Select a numeric column (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_violin_num_{post_cacounter}"
+                                    )
+
+                                    post_fig, post_ax = plt.subplots(figsize=(10, 5))
+                                    sns.violinplot(x=post_selected_categorical, y=post_selected_numeric, data=df,
+                                                   ax=post_ax)
+                                    post_ax.set_title(
+                                        f"Violin Plot of {post_selected_numeric} by {post_selected_categorical}")
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Histogram
+                                ###########################
+                                elif post_ca_analysis_type == "Histogram":
+                                    post_group_by_category = st.checkbox(
+                                        f"Do you want to group by a categorical variable? (Analysis {post_cacounter})",
+                                        key=f"post_group_by_cat_{post_cacounter}"
+                                    )
+
+                                    if not post_group_by_category:
+                                        post_selected_numeric = st.selectbox(
+                                            f"Select a numeric column (Analysis {post_cacounter})",
+                                            options=post_numeric_cols,
+                                            key=f"post_hist_num_{post_cacounter}"
+                                        )
+
+                                        post_fig, post_ax = plt.subplots()
+                                        sns.histplot(df[post_selected_numeric], kde=False, ax=post_ax)
+                                        post_ax.set_title(f"Histogram for {post_selected_numeric}")
+                                        st.pyplot(post_fig)
+
+                                    else:
+                                        post_selected_numeric = st.selectbox(
+                                            f"Select a numeric column (Analysis {post_cacounter})",
+                                            options=post_numeric_cols,
+                                            key=f"post_hist_numeric_{post_cacounter}"
+                                        )
+                                        post_selected_categorical = st.selectbox(
+                                            f"Select a categorical column (Analysis {post_cacounter})",
+                                            options=post_cat_cols,
+                                            key=f"post_hist_categorical_{post_cacounter}"
+                                        )
+
+                                        post_fig, post_ax = plt.subplots(figsize=(10, 5))
+                                        sns.histplot(data=df, x=post_selected_numeric, hue=post_selected_categorical,
+                                                     multiple="stack", ax=post_ax)
+                                        post_ax.set_title(
+                                            f"Histogram of {post_selected_numeric} by {post_selected_categorical}")
+                                        st.pyplot(post_fig)
+
+                                ###########################
+                                ### KDE Plot
+                                ###########################
+                                elif post_ca_analysis_type == "KDE Plot":
+                                    post_selected_numeric = st.selectbox(
+                                        f"Select a numeric column (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_kde_num_{post_cacounter}"
+                                    )
+
+                                    post_show_histogram = st.checkbox(
+                                        f"Also display histogram with KDE plot? (Analysis {post_cacounter})",
+                                        key=f"post_show_histogram_{post_cacounter}"
+                                    )
+
+                                    post_fig, post_ax1 = plt.subplots()
+
+                                    sns.kdeplot(df[post_selected_numeric], ax=post_ax1, label="KDE", color="blue")
+                                    post_ax1.set_xlabel(f"{post_selected_numeric}")
+                                    post_ax1.set_ylabel("Density", color="blue")
+                                    post_ax1.tick_params(axis="y", labelcolor="blue")
+
+                                    if post_show_histogram:
+                                        post_ax2 = post_ax1.twinx()
+                                        sns.histplot(df[post_selected_numeric], kde=False, ax=post_ax2, label="Histogram",
+                                                     color="orange", alpha=0.6)
+                                        post_ax2.set_ylabel("Count", color="orange")
+                                        post_ax2.tick_params(axis="y", labelcolor="orange")
+
+                                    post_fig.suptitle(f"KDE Plot with Histogram for {post_selected_numeric}")
+                                    post_ax1.legend(loc="upper left")
+                                    if post_show_histogram:
+                                        post_ax2.legend(loc="upper right")
+
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Bivariate Boxplot
+                                ###########################
+                                elif post_ca_analysis_type == "Bivariate Boxplot":
+                                    post_selected_x = st.selectbox(
+                                        f"Select X-axis variable (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_bivar_x_{post_cacounter}"
+                                    )
+                                    post_selected_y = st.selectbox(
+                                        f"Select Y-axis variable (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_bivar_y_{post_cacounter}"
+                                    )
+
+                                    post_fig, post_ax = plt.subplots()
+                                    sns.boxplot(x=df[post_selected_x], y=df[post_selected_y], ax=post_ax)
+                                    post_ax.set_title(f"Boxplot of {post_selected_x} vs {post_selected_y}")
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Scatter Plot
+                                ###########################
+                                elif post_ca_analysis_type == "Scatter Plot":
+                                    post_selected_x = st.selectbox(
+                                        f"Select X-axis variable (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_scatter_x_{post_cacounter}"
+                                    )
+                                    post_selected_y = st.selectbox(
+                                        f"Select Y-axis variable (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_scatter_y_{post_cacounter}"
+                                    )
+
+                                    post_selected_categorical = st.selectbox(
+                                        f"Select a categorical variable for grouping (optional) (Analysis {post_cacounter})",
+                                        options=[None] + post_cat_cols,
+                                        key=f"post_scatter_categorical_{post_cacounter}"
+                                    )
+
+                                    post_add_regression_line = st.checkbox(
+                                        f"Add regression line? (Analysis {post_cacounter})",
+                                        key=f"post_regression_line_{post_cacounter}"
+                                    )
+
+                                    if post_add_regression_line:
+                                        post_regression_type = st.selectbox(
+                                            f"Select the type of regression line (Analysis {post_cacounter})",
+                                            ["Linear", "Polynomial", "Logarithmic", "Exponential"],
+                                            key=f"post_regression_type_{post_cacounter}"
+                                        )
+
+                                        if post_regression_type == "Polynomial":
+                                            post_poly_degree = st.slider(
+                                                f"Select the degree of the polynomial (Analysis {post_cacounter})",
+                                                min_value=2,
+                                                max_value=10,
+                                                value=2,
+                                                key=f"post_poly_degree_{post_cacounter}"
+                                            )
+
+                                        post_category_based_line = st.checkbox(
+                                            f"Draw regression line for each category (if categorical variable is selected)? (Analysis {post_cacounter})",
+                                            key=f"post_category_based_line_{post_cacounter}"
+                                        )
+
+                                    post_fig, post_ax = plt.subplots(figsize=(10, 5))
+
+                                    if post_selected_categorical:
+                                        post_scatter = sns.scatterplot(x=df[post_selected_x], y=df[post_selected_y],
+                                                                       hue=df[post_selected_categorical], ax=post_ax)
+                                    else:
+                                        sns.scatterplot(x=df[post_selected_x], y=df[post_selected_y], ax=post_ax)
+
+                                    if post_add_regression_line:
+                                        if post_selected_categorical and post_category_based_line:
+                                            unique_categories = df[post_selected_categorical].unique()
+                                            for idx, category in enumerate(unique_categories):
+                                                category_data = df[df[post_selected_categorical] == category]
+                                                if post_regression_type == "Linear":
+                                                    sns.regplot(x=category_data[post_selected_x],
+                                                                y=category_data[post_selected_y], ax=post_ax, scatter=False)
+                                                elif post_regression_type == "Polynomial":
+                                                    sns.regplot(x=category_data[post_selected_x],
+                                                                y=category_data[post_selected_y], ax=post_ax, scatter=False,
+                                                                order=post_poly_degree)
+
+                                        else:
+                                            if post_regression_type == "Linear":
+                                                sns.regplot(x=df[post_selected_x], y=df[post_selected_y], ax=post_ax,
+                                                            scatter=False)
+                                            elif post_regression_type == "Polynomial":
+                                                sns.regplot(x=df[post_selected_x], y=df[post_selected_y], ax=post_ax,
+                                                            scatter=False, order=post_poly_degree)
+
+                                    post_ax.set_title(f"Scatter Plot of {post_selected_x} vs {post_selected_y}")
+                                    st.pyplot(post_fig)
+
+
+                                ###########################
+                                ### Regression Line Plot
+                                ###########################
+                                elif post_ca_analysis_type == "Regression Line Plot":
+
+
+                                    st.subheader(f"Scatter Plot with Regression Line for Analysis {post_cacounter}")
+                                    post_selected_x = st.selectbox(
+                                        "Select X-axis variable",
+                                        options=numeric_cols,
+                                        key=f"post_reg_x_{post_cacounter}"
+                                    )
+                                    post_selected_y = st.selectbox(
+                                        "Select Y-axis variable",
+                                        options=numeric_cols,
+                                        key=f"post_reg_y_{post_cacounter}"
+                                    )
+
+                                    post_fig, post_ax = plt.subplots()
+                                    sns.regplot(x=df[post_selected_x], y=df[post_selected_y], ax=post_ax)
+                                    post_ax.set_title(f"Regression Plot of {post_selected_x} vs {post_selected_y}")
+                                    st.pyplot(post_fig)
 
 
 
+                                ###########################
+                                ### Crosstab Analysis
+                                ###########################
+                                elif post_ca_analysis_type == "Crosstab":
+
+                                    st.subheader(f"Crosstab for Analysis {post_cacounter}")
+
+                                    # Kategorik değişkenleri seçtir
+                                    post_selected_cat1 = st.selectbox(
+                                        "Select the first categorical variable",
+                                        options=cat_cols,
+                                        key=f"post_crosstab_cat1_{post_cacounter}"
+                                    )
+                                    post_selected_cat2 = st.selectbox(
+                                        "Select the second categorical variable",
+                                        options=cat_cols,
+                                        key=f"post_crosstab_cat2_{post_cacounter}"
+                                    )
+
+                                    # Crosstab oluşturma
+                                    post_crosstab = pd.crosstab(df[post_selected_cat1], df[post_selected_cat2])
+                                    post_crosstab_percent = pd.crosstab(df[post_selected_cat1], df[post_selected_cat2],
+                                                                   normalize='index') * 100
+
+                                    # Crosstab gösterimi
+                                    st.write("Crosstab:")
+                                    st.write(post_crosstab)
+
+                                    # Yüzde şeklinde normalize edilmiş crosstab
+                                    st.write("Crosstab as percentage:")
+                                    st.write(post_crosstab_percent)
+
+
+                                ###########################
+                                ### Frequency Table
+                                ###########################
+                                elif post_ca_analysis_type == "Frequency Table":
+
+                                    st.subheader(f"Frequency Table for Analysis {post_cacounter}")
+                                    post_selected_cat = st.selectbox(
+                                        "Select a categorical variable",
+                                        options=categorical_cols,
+                                        key=f"post_freq_cat_{post_cacounter}"
+                                    )
+
+                                    post_freq_table = df[post_selected_cat].value_counts()
+                                    st.write(
+                                        pd.DataFrame({"Count": post_freq_table, "Percentage": post_freq_table / len(df) * 100}))
+
+
+                                ###########################
+                                ### Stacked Bar Plot
+                                ###########################
+                                elif post_ca_analysis_type == "Stacked Bar Plot":
+
+
+                                    st.subheader(f"Stacked Bar Plot for Analysis {post_cacounter}")
+                                    post_selected_cat1 = st.selectbox(
+                                        "Select the first categorical variable",
+                                        options=categorical_cols,
+                                        key=f"post_stacked_cat1_{post_cacounter}"
+                                    )
+                                    post_selected_cat2 = st.selectbox(
+                                        "Select the second categorical variable",
+                                        options=categorical_cols,
+                                        key=f"post_stacked_cat2_{post_cacounter}"
+                                    )
+
+                                    post_crosstab = pd.crosstab(df[post_selected_cat1], df[post_selected_cat2])
+
+                                    post_fig, post_ax = plt.subplots()
+                                    post_crosstab.plot(kind="bar", stacked=True, ax=post_ax)
+                                    post_ax.set_title(f"Stacked Bar Plot of {post_selected_cat1} by {post_selected_cat2}")
+                                    st.pyplot(post_fig)
+
+
+                                ###########################
+                                ### Pairwise Categorical Relationship
+                                ###########################
+                                elif post_ca_analysis_type == "Pairwise Categorical Relationship":
+
+                                    ### kategorik ve nümerik columns'ların tespiti
+                                    post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                                      num_but_cat_arg,
+                                                                                                                      cat_but_car_arg)
+                                    post_categorical_cols = post_cat_cols
+                                    post_numeric_cols = post_num_cols
+
+                                    st.subheader(f"Pairwise Categorical Relationship for Analysis {post_cacounter}")
+                                    post_selected_cat1 = st.selectbox(
+                                        f"Select the first categorical variable (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_pairwise_cat1_{post_cacounter}"
+                                    )
+                                    post_selected_cat2 = st.selectbox(
+                                        f"Select the second categorical variable (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_pairwise_cat2_{post_cacounter}"
+                                    )
+
+                                    post_fig, post_ax = plt.subplots()
+                                    sns.countplot(x=df[post_selected_cat1], hue=df[post_selected_cat2], ax=post_ax)
+                                    post_ax.set_title(f"Count Plot of {post_selected_cat1} by {post_selected_cat2}")
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Joint Plot
+                                ###########################
+                                elif post_ca_analysis_type == "Joint Plot":
+
+                                    ### kategorik ve nümerik columns'ların tespiti
+                                    post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                                      num_but_cat_arg,
+                                                                                                                      cat_but_car_arg)
+                                    post_categorical_cols = post_cat_cols
+                                    post_numeric_cols = post_num_cols
+                                    post_all_cols = post_num_cols + post_cat_cols
+
+                                    st.subheader(f"Joint Plot for Analysis {post_cacounter}")
+                                    post_selected_x = st.selectbox(
+                                        f"Select X-axis variable (Analysis {post_cacounter})",
+                                        options=post_all_cols,
+                                        key=f"post_joint_x_{post_cacounter}"
+                                    )
+                                    post_selected_y = st.selectbox(
+                                        f"Select Y-axis variable (Analysis {post_cacounter})",
+                                        options=post_all_cols,
+                                        key=f"post_joint_y_{post_cacounter}"
+                                    )
+
+                                    # Jointplot oluşturma
+                                    post_fig = sns.jointplot(x=post_selected_x, y=post_selected_y, data=df, kind="scatter")
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Mosaic Plot
+                                ###########################
+                                elif post_ca_analysis_type == "Mosaic Plot":
+
+                                    ### kategorik ve nümerik columns'ların tespiti
+                                    post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                                      num_but_cat_arg,
+                                                                                                                      cat_but_car_arg)
+                                    post_categorical_cols = post_cat_cols
+                                    post_numeric_cols = post_num_cols
+
+                                    from statsmodels.graphics.mosaicplot import mosaic
+                                    from itertools import cycle
+                                    import matplotlib.colors as mcolors
+                                    import matplotlib.patches as mpatches
+
+                                    st.subheader(f"Mosaic Plot for Analysis {post_cacounter}")
+
+                                    post_selected_cat1 = st.selectbox(
+                                        f"Select the first categorical variable (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_mosaic_cat1_{post_cacounter}"
+                                    )
+                                    post_selected_cat2 = st.selectbox(
+                                        f"Select the second categorical variable (Analysis {post_cacounter})",
+                                        options=[col for col in post_categorical_cols if col != post_selected_cat1],
+                                        key=f"post_mosaic_cat2_{post_cacounter}"
+                                    )
+
+                                    # Profesyonel gözükmesi için pastel tonlarda renk paleti
+                                    post_pastel_colors = list(
+                                        mcolors.TABLEAU_COLORS.values())  # Tableau'nun profesyonel renk paleti
+
+                                    # post_selected_cat2'nin unique değerlerini elde ediyoruz ve string'e çeviriyoruz
+                                    post_unique_values_cat2 = df[post_selected_cat2].astype(str).unique()
+
+                                    # post_selected_cat2'nin her unique değeri için bir renk atıyoruz
+                                    post_color_dict = {value: color for value, color in
+                                                       zip(post_unique_values_cat2, cycle(post_pastel_colors))}
+
+                                    # Özelleştirilmiş renklerle mosaic plot
+                                    def post_custom_mosaic_props(key):
+                                        # key[1] post_selected_cat2'yi ifade eder, bu değere göre renk belirliyoruz
+                                        return {'color': post_color_dict[str(key[1])]}  # key[1] string olarak işleniyor
+
+                                    # labelizer fonksiyonunu gruplama işlemini düzeltmek için yeniden yazıyoruz
+                                    def post_labelizer(key):
+                                        post_key_tuple = tuple(key)
+                                        post_group_size = df.groupby([post_selected_cat1, post_selected_cat2]).size()
+
+                                        if post_key_tuple in post_group_size.index:
+                                            post_value = post_group_size[post_key_tuple]
+                                            post_percentage = post_value / len(df) * 100
+                                            return f'{key[0]} & {key[1]}\n({post_percentage:.1f}%)'
+                                        else:
+                                            return ''
+
+                                    post_fig, post_ax = plt.subplots(figsize=(10, 8))
+
+                                    # Mosaic plot oluşturma
+                                    mosaic(df, [post_selected_cat1, post_selected_cat2], ax=post_ax,
+                                           properties=post_custom_mosaic_props, labelizer=post_labelizer)
+
+                                    # Eksenin solundaki değerleri kaldırma
+                                    post_ax.get_yaxis().set_visible(False)
+
+                                    # Renklerin hangi sınıfa ait olduğunu göstermek için legend ekleme
+                                    post_legend_patches = [
+                                        mpatches.Patch(color=post_color_dict[val], label=f'{post_selected_cat2}: {val}') for
+                                        val in post_unique_values_cat2]
+                                    post_ax.legend(handles=post_legend_patches, title="Groups", bbox_to_anchor=(1.05, 1),
+                                                   loc='upper left')
+
+                                    post_ax.set_title(f"Mosaic Plot of {post_selected_cat1} and {post_selected_cat2}",
+                                                      fontsize=14)
+                                    st.pyplot(post_fig)
+
+                                ###########################
+                                ### Pivot Table
+                                ###########################
+                                elif post_ca_analysis_type == "Pivot Table":
+
+                                    ### kategorik ve nümerik columns'ların tespiti
+                                    post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                                      num_but_cat_arg,
+                                                                                                                      cat_but_car_arg)
+                                    post_categorical_cols = post_cat_cols
+                                    post_numeric_cols = post_num_cols
+
+                                    st.subheader(f"Pivot Table for Analysis {post_cacounter}")
+                                    post_selected_numeric = st.selectbox(
+                                        f"Select a numeric column (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_pivot_num_{post_cacounter}"
+                                    )
+                                    post_selected_cat = st.selectbox(
+                                        f"Select a categorical column (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_pivot_cat_{post_cacounter}"
+                                    )
+
+                                    post_pivot_table = pd.pivot_table(df, values=post_selected_numeric,
+                                                                      index=post_selected_cat, aggfunc=['mean', 'sum'])
+                                    st.write(post_pivot_table)
+                                ###########################
+                                ### Variance and Standard Deviation
+                                ###########################
+                                elif post_ca_analysis_type == "Variance and Standard Deviation":
+
+                                    ### kategorik ve nümerik columns'ların tespiti
+                                    post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                                      num_but_cat_arg,
+                                                                                                                      cat_but_car_arg)
+                                    post_categorical_cols = post_cat_cols
+                                    post_numeric_cols = post_num_cols
+
+                                    st.subheader(f"Variance and Standard Deviation for Analysis {post_cacounter}")
+
+                                    # Numeric column selection
+                                    post_selected_numeric = st.selectbox(
+                                        f"Select a numeric column (Analysis {post_cacounter})",
+                                        options=post_numeric_cols,
+                                        key=f"post_var_num_{post_cacounter}"  # Benzersiz key kullanımı
+                                    )
+
+                                    # Categorical column selection
+                                    post_selected_cat = st.selectbox(
+                                        f"Select a categorical column (Analysis {post_cacounter})",
+                                        options=post_categorical_cols,
+                                        key=f"post_var_cat_{post_cacounter}"  # Benzersiz key kullanımı
+                                    )
+
+                                    # Grouped variance and standard deviation calculations
+                                    post_grouped_var = df.groupby(post_selected_cat)[
+                                        post_selected_numeric].var().reset_index()
+                                    post_grouped_std = df.groupby(post_selected_cat)[
+                                        post_selected_numeric].std().reset_index()
+
+                                    # Results display
+                                    st.write(f"Variance of {post_selected_numeric} by {post_selected_cat}:")
+                                    st.write(post_grouped_var)
+                                    st.write(f"Standard Deviation of {post_selected_numeric} by {post_selected_cat}:")
+                                    st.write(post_grouped_std)
+
+                                ###########################
+                                ### Zaman Serisi İçeren Verisetlerinde Analiz
+                                ###########################
+                                elif post_ca_analysis_type == "Zaman Serisi İçeren Verisetlerinde Analiz":
+
+                                    st.subheader("zaman serisi konusuna gelindiğinde tekrar gözden geçir!!!!! saçma sapan bir kurgu yaptım :D")
+
+                                    ### kategorik ve nümerik columns'ların tespiti
+                                    post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                                                      num_but_cat_arg,
+                                                                                                                      cat_but_car_arg)
+                                    post_categorical_cols = post_cat_cols
+                                    post_numeric_cols = post_num_cols
+
+                                    post_an_df = df.copy()
+
+                                    ##############################
+                                    #### STRUCTURE - Time Variable Processing
+                                    ##############################
+                                    post_time_var_present = st.radio(
+                                        f"Is there a time variable in the DataFrame? (Analysis {post_cacounter})",
+                                        ("No", "Yes"),
+                                        key=f"post_time_var_present_{post_cacounter}"
+                                    )
+
+                                    if post_time_var_present == "Yes":
+                                        post_selected_time_var = st.selectbox(
+                                            f"Select the time variable (Analysis {post_cacounter})",
+                                            post_an_df.columns,
+                                            key=f"post_time_var_select_{post_cacounter}"
+                                        )
+
+                                        if not pd.api.types.is_datetime64_any_dtype(post_an_df[post_selected_time_var]):
+                                            post_convert_to_datetime = st.radio(
+                                                f"'{post_selected_time_var}' is not a datetime type. Do you want to convert it? (Analysis {post_cacounter})",
+                                                ("No", "Yes"),
+                                                key=f"post_convert_to_datetime_{post_cacounter}"
+                                            )
+                                            if post_convert_to_datetime == "Yes":
+                                                post_an_df[post_selected_time_var] = pd.to_datetime(
+                                                    post_an_df[post_selected_time_var], utc=True)
+                                                st.write(
+                                                    f"'{post_selected_time_var}' has been successfully converted to datetime.")
+
+                                        post_analysis_type = st.radio(
+                                            f"Select the type of time series analysis you want to perform (Analysis {post_cacounter}):",
+                                            ["Time Series Visualization", "Decomposition Analysis"],
+                                            key=f"post_analysis_type_{post_cacounter}"
+                                        )
+
+                                        if post_analysis_type == "Time Series Visualization":
+                                            st.subheader(f"Time Series Visualization for Analysis {post_cacounter}")
+
+                                            post_numeric_cols = df.select_dtypes(
+                                                include=['float64', 'int64']).columns.tolist()
+                                            post_target_col = st.selectbox(
+                                                f"Select the target variable (numeric) (Analysis {post_cacounter}):",
+                                                options=post_numeric_cols,
+                                                key=f"post_target_col_{post_cacounter}"
+                                            )
+
+                                            post_selected_categorical = st.multiselect(
+                                                f"Select categorical variables for filtering or groupby (optional) (Analysis {post_cacounter}):",
+                                                options=post_categorical_cols,
+                                                key=f"post_categorical_select_{post_cacounter}"
+                                            )
+
+                                            post_group_or_filter = st.radio(
+                                                f"Do you want to filter or group by the selected categorical variables? (Analysis {post_cacounter})",
+                                                ("Filter", "Groupby"),
+                                                key=f"post_group_or_filter_{post_cacounter}"
+                                            )
+
+                                            if post_group_or_filter == "Groupby" and post_selected_categorical:
+                                                post_fig, post_ax = plt.subplots(figsize=(10, 5))
+                                                post_an_df_grouped = post_an_df.groupby([
+                                                                                            post_selected_time_var] + post_selected_categorical).mean().reset_index()
+                                                sns.lineplot(x=post_an_df_grouped[post_selected_time_var],
+                                                             y=post_an_df_grouped[post_target_col],
+                                                             hue=post_an_df_grouped[post_selected_categorical[0]],
+                                                             ax=post_ax)
+                                                post_ax.set_title(
+                                                    f"Time Series Plot of {post_target_col} grouped by {post_selected_categorical[0]}")
+                                                post_ax.set_xlabel("Date")
+                                                post_ax.set_ylabel(post_target_col)
+                                                st.pyplot(post_fig)
+                                            else:
+                                                post_fig, post_ax = plt.subplots(figsize=(10, 5))
+                                                post_ax.plot(post_an_df[post_selected_time_var],
+                                                             post_an_df[post_target_col], label=post_target_col)
+                                                post_ax.set_title(f"Time Series Plot of {post_target_col}")
+                                                post_ax.set_xlabel("Date")
+                                                post_ax.set_ylabel(post_target_col)
+                                                st.pyplot(post_fig)
+
+                                        elif post_analysis_type == "Decomposition Analysis":
+                                            st.subheader(f"Decomposition Analysis for Analysis {post_cacounter}")
+
+                                            post_numeric_cols = df.select_dtypes(
+                                                include=['float64', 'int64']).columns.tolist()
+                                            post_target_col = st.selectbox(
+                                                f"Select the target variable (numeric) (Analysis {post_cacounter}):",
+                                                options=post_numeric_cols,
+                                                key=f"post_target_col_{post_cacounter}"
+                                            )
+
+                                            post_define_freq = st.radio(
+                                                f"Do you want to define a frequency for the time variable? (Analysis {post_cacounter})",
+                                                ("Auto Detect", "Manually Select"),
+                                                key=f"post_define_freq_{post_cacounter}"
+                                            )
+
+                                            if post_define_freq == "Auto Detect":
+                                                post_freq_code = pd.infer_freq(post_an_df[post_selected_time_var])
+                                                if post_freq_code:
+                                                    st.write(f"Auto Detected Frequency: {post_freq_code}")
+                                                else:
+                                                    st.error(
+                                                        "Frequency could not be inferred. Please manually select a frequency.")
+                                                    post_freq_code = None
+
+                                            elif post_define_freq == "Manually Select":
+                                                post_freq_options = {'Hourly': 'H', 'Minutely': 'T', 'Secondly': 'S',
+                                                                     'Daily': 'D', 'Business Day': 'B', 'Weekly': 'W',
+                                                                     'Monthly': 'M', 'Quarterly': 'Q', 'Yearly': 'Y'}
+                                                post_selected_freq = st.selectbox(
+                                                    f"Select the frequency for the time variable (Analysis {post_cacounter}):",
+                                                    list(post_freq_options.keys()), key=f"post_freq_select_{post_cacounter}")
+                                                post_freq_code = post_freq_options[post_selected_freq]
+
+                                            if post_freq_code:
+                                                post_an_df = post_an_df.set_index(
+                                                    pd.DatetimeIndex(post_an_df[post_selected_time_var])).asfreq(
+                                                    post_freq_code)
+
+                                                post_handle_missing_values = st.radio(
+                                                    f"How do you want to handle missing values in the time series? (Analysis {post_cacounter})",
+                                                    ("Remove Missing Values", "Fill Missing Values with Forward Fill",
+                                                     "Fill Missing Values with Backward Fill",
+                                                     "Fill Missing Values with Zero", "Fill Missing Values with Mean",
+                                                     "Interpolate Missing Values"),
+                                                    key=f"post_handle_missing_{post_cacounter}"
+                                                )
+
+                                                if post_handle_missing_values == "Remove Missing Values":
+                                                    post_an_df = post_an_df.dropna(subset=[post_target_col])
+                                                elif post_handle_missing_values == "Fill Missing Values with Forward Fill":
+                                                    post_an_df[post_target_col] = post_an_df[post_target_col].fillna(
+                                                        method='ffill')
+                                                elif post_handle_missing_values == "Fill Missing Values with Backward Fill":
+                                                    post_an_df[post_target_col] = post_an_df[post_target_col].fillna(
+                                                        method='bfill')
+                                                elif post_handle_missing_values == "Fill Missing Values with Zero":
+                                                    post_an_df[post_target_col] = post_an_df[post_target_col].fillna(0)
+                                                elif post_handle_missing_values == "Fill Missing Values with Mean":
+                                                    post_mean_value = post_an_df[post_target_col].mean()
+                                                    post_an_df[post_target_col] = post_an_df[post_target_col].fillna(
+                                                        post_mean_value)
+                                                elif post_handle_missing_values == "Interpolate Missing Values":
+                                                    post_an_df[post_target_col] = post_an_df[post_target_col].interpolate(
+                                                        method='linear')
+
+                                                st.write("Updated DataFrame after handling missing values:")
+                                                st.write(post_an_df)
+
+                                                post_resample_data = st.radio(
+                                                    f"Do you want to resample the time series data? (Analysis {post_cacounter})",
+                                                    ("No", "Yes"),
+                                                    key=f"post_resample_{post_cacounter}"
+                                                )
+
+                                                if post_resample_data == "Yes":
+                                                    post_resample_freq = st.selectbox(
+                                                        f"Select the resampling frequency (Analysis {post_cacounter}):",
+                                                        ['MS', 'Q', 'Y'],  # Monthly, Quarterly, Yearly
+                                                        key=f"post_resample_freq_{post_cacounter}"
+                                                    )
+                                                    post_an_df = post_an_df.resample(post_resample_freq).mean()
+
+                                                post_decomposition_model = st.selectbox(
+                                                    f"Select the decomposition model (Additive or Multiplicative) (Analysis {post_cacounter}):",
+                                                    ["additive", "multiplicative"],
+                                                    key=f"post_decomposition_model_{post_cacounter}"
+                                                )
+
+                                                post_stationary_test = st.checkbox(
+                                                    f"Perform stationarity test (ADF)? (Analysis {post_cacounter})",
+                                                    key=f"post_stationarity_test_{post_cacounter}")
+
+                                                def post_is_stationary(y):
+                                                    post_p_value = sm.tsa.stattools.adfuller(y)[1]
+                                                    if post_p_value < 0.05:
+                                                        st.write(
+                                                            f"Result: Stationary (H0: non-stationary rejected, p-value: {post_p_value:.4f})")
+                                                    else:
+                                                        st.write(
+                                                            f"Result: Non-Stationary (H0: non-stationary accepted, p-value: {post_p_value:.4f})")
+
+                                                def post_ts_decompose(y, model="additive", stationary=False,
+                                                                      resample_freq=None):
+                                                    y.index = pd.to_datetime(y.index)
+
+                                                    if resample_freq:
+                                                        y = y.resample(resample_freq).mean()
+                                                        y.dropna(inplace=True)
+
+                                                    post_result = seasonal_decompose(y, model=model)
+
+                                                    post_fig, post_axes = plt.subplots(4, 1, sharex=True, sharey=False)
+                                                    post_fig.set_figheight(10)
+                                                    post_fig.set_figwidth(15)
+
+                                                    post_axes[0].set_title("Decomposition for " + model + " model")
+                                                    post_axes[0].plot(y, 'k', label='Original ' + model)
+                                                    post_axes[0].legend(loc='upper left')
+
+                                                    post_axes[1].plot(post_result.trend, label='Trend')
+                                                    post_axes[1].legend(loc='upper left')
+
+                                                    post_axes[2].plot(post_result.seasonal, 'g',
+                                                                      label='Seasonality & Mean: ' + str(
+                                                                          round(post_result.seasonal.mean(), 4)))
+                                                    post_axes[2].legend(loc='upper left')
+
+                                                    post_axes[3].plot(post_result.resid, 'r',
+                                                                      label='Residuals & Mean: ' + str(
+                                                                          round(post_result.resid.mean(), 4)))
+                                                    post_axes[3].legend(loc='upper left')
+                                                    st.pyplot(post_fig)
+
+                                                    if stationary:
+                                                        post_is_stationary(y)
+
+                                                post_ts_decompose(post_an_df[post_target_col],
+                                                                  model=post_decomposition_model,
+                                                                  stationary=post_stationary_test,
+                                                                  resample_freq=post_resample_freq)
+
+                                elif post_ca_analysis_type == "Steamgraph":
+                                    st.write("Steamgraph eklenecek")
+
+                                # Kullanıcıya başka bir işlem yapmak isteyip istemediği soruluyor
+                                post_ca_continue_or_not = st.radio(
+                                    "Başka bir işlem yapmak istiyor musunuz?",
+                                    ("Evet", "Hayır"),
+                                    index=1,
+                                    key=f"post_ca_continue_or_not_{post_cacounter}"
+                                )
+
+                                if post_ca_continue_or_not == "Hayır":
+                                    st.write("Döngü sonlandırıldı.")
+                                    break
+
+                            # Her adımda cacounter artırılıyor
+                            post_cacounter += 1
+
+                    ####################################
+                    ################ PRE-OVERVIEW ÜST TABI - Analysis bölümü - Measurement Problems alt tabı
+                    ####################################
+
+                    mp_feature_options = [
+                        "Hiçbir işlem yapmak istemiyorum",  # Varsayılan seçenek
+                        "İki Örneklem T Testi",
+                        "İki Örneklem Oran Testi",
+                        "ANOVA"
+                    ]
+
+                    postmpcounter = 1
+                    while True:
+                        with post_vtab4.expander(f"İşlem Seçimi {postmpcounter}", expanded=True):
+                            postmpcol1, postmpcol2 = st.columns(2)
+
+                            # Kullanıcıya önce kategori seçimi sunuluyor
+                            postmp_category_choice = postmpcol1.selectbox(
+                                "Lütfen işlem kategorisini seçin:",
+                                options=mp_feature_options,
+                                key=f"postmp_selectbox_category_{postmpcounter}"
+                                # postmpcounter ile benzersiz key
+                            )
+
+                            if postmp_category_choice == "Hiçbir işlem yapmak istemiyorum":
+                                break
+
+                            ################################################################################################
+                            ##################   İki Örneklem T Testi
+                            ################################################################################################
+
+                            # Eğer "İki Örneklem T Testi" seçilirse
+                            if postmp_category_choice == "İki Örneklem T Testi":
+
+                                st.button("Yorumlama hk.",
+                                          help="""Soru: iki örneklem T testi sonucunda anlamlı ilişki bulurken iki örneklem oran testinde anlamlı ilişki yoktur sonucuna ulaşıyorum. bu mümkün müdür? nasıl yorumlamam gerekiyor? Cevap: Evet, iki örneklem T testi ve iki örneklem oran testi farklı sonuçlar verebilir, ve bu durumu anlamak ve yorumlamak önemlidir. Bunun mümkün olup olmadığını ve nasıl yorumlanacağını daha ayrıntılı olarak açıklayayım:
+    
+                                ### 1. **İki Örneklem T Testi**
+                                - **Amaç**: İki örneklem T testi, iki grup arasındaki **ortalama farkını** test eder. Yani, iki grubun ortalamaları arasında anlamlı bir fark olup olmadığını kontrol eder.
+                                - **Varsayımlar**: 
+                                  - Verilerin normal dağılıma sahip olması.
+                                  - Varyansların homojen olması (eşit varyans).
+                                  - Bağımsız örneklem.
+    
+                                T testi, sayısal (kesintisiz) bir değişkenin iki grup arasında ortalamasını karşılaştırmak için kullanılır. Eğer gruplar arasında ortalama farkı önemliyse, bu test sonucunda anlamlı bir ilişki bulabilirsiniz.
+    
+                                ### 2. **İki Örneklem Oran Testi (Proportions Z-Test)**
+                                - **Amaç**: İki örneklem oran testi, iki grup arasındaki **oran farkını** test eder. Yani, iki grubun belirli bir olayı yaşama oranları arasında anlamlı bir fark olup olmadığını kontrol eder.
+                                - **Varsayımlar**: 
+                                  - Her iki grubun örnek büyüklüğü yeterince büyük olmalıdır.
+                                  - Bağımsız örneklem.
+    
+                                Bu test, genellikle **kategorik** veriler için kullanılır. Eğer bir olayın iki grup arasındaki olasılığı ya da oranı arasında fark olup olmadığını test etmek isterseniz, bu testi kullanırsınız.
+    
+                                ### 3. **İki Testin Farklı Sonuçlar Vermesi**
+                                İki test farklı şeyler ölçtüğünden, farklı sonuçlar vermesi mümkündür. Bunun nedeni şunlar olabilir:
+    
+                                1. **Veri Türleri ve Analiz Yaklaşımı Farklıdır**: İki örneklem T testi **kesintisiz (sayısal)** verilerle çalışırken, iki örneklem oran testi **kategorik** verilerle çalışır. Dolayısıyla, bir testin fark bulduğu bir durumda diğer test fark bulamayabilir. Örneğin:
+                                   - İki grup arasındaki ortalama değerler anlamlı derecede farklı olabilir (T testi anlamlı sonuç verebilir).
+                                   - Ancak, iki grup arasında olayın gerçekleşme oranları arasında anlamlı bir fark olmayabilir (oran testi anlamlı sonuç vermeyebilir).
+    
+                                2. **Veri Dağılımı**: İki grup arasındaki dağılımlar farklı olabilir. Örneğin, iki grubun ortalama değeri önemli ölçüde farklı olabilir ancak oranlar (örneğin, bir olayın gerçekleşme oranı) bu kadar fark yaratmayabilir.
+    
+                                3. **Örneklem Büyüklüğü**: Oran testinde örneklem büyüklüğü veya gözlenen olay sayısı yeterli büyüklükte olmayabilir. T testi daha duyarlı olabilirken, oran testi daha büyük örnek büyüklüklerine ihtiyaç duyabilir.
+    
+                                ### 4. **Yorumlama**
+                                - **İki Örneklem T Testi Anlamlı, Oran Testi Anlamsız**: Bu durumda, iki grubun **ortalama** değerleri arasında fark olduğunu, ancak bu farkın oranlar açısından yeterince güçlü olmadığını söyleyebilirsiniz.
+                                   - Örneğin, grupların ortalama yaşları arasında fark olabilir, ancak iki grubun belirli bir hastalığa yakalanma oranı açısından anlamlı bir fark yoktur.
+                                   - Bir diğer olasılık ise, iki grup arasında olayın frekansı, oranlara göre farklılık göstermiyor olabilir ama sayısal ölçüm açısından gruplar önemli bir fark sergiliyor olabilir.
+    
+                                - **Nasıl Yorumlanmalı**: Bu durumda, sayısal bir değişkenin iki grup arasında ortalama bazında farklı olduğunu, ancak bu farkın olayların oranları (kategorik sonuçlar) üzerinde belirgin bir etkisi olmadığını not etmek önemlidir. Yani, ortalamalar açısından iki grup farklı olabilir, fakat oranlar açısından farklılık bulunmamaktadır.
+    
+                                ### Özet:
+                                - **İki Örneklem T Testi**: İki grup arasındaki ortalamaların farkını test eder. Eğer anlamlıysa, gruplar arasında ortalama değerler arasında anlamlı bir fark vardır.
+                                - **İki Örneklem Oran Testi**: İki grup arasındaki oran farkını test eder. Eğer anlamlı değilse, bu iki grubun belirli bir olaya yakalanma oranları arasında fark olmadığı anlamına gelir.
+                                - **Farklı sonuçlar**: Bu durum, sayısal değerler (ortalama farkları) ile kategorik olayların gerçekleşme oranları arasındaki farkların farklı sonuçlar doğurabileceğini gösterir.
+    
+                                Bu nedenle, testlerin amacına uygun şekilde sonuçları yorumlayarak, verinizin doğasına göre hangi farkların daha önemli olduğunu değerlendirmelisiniz.""",
+
+                                          key=f"postmp_help_button_{postmpcounter}")
+
+                                # Kategorik ve nümerik değişkenleri tespit etme
+                                post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(
+                                    df, num_but_cat_arg,
+                                    cat_but_car_arg)
+                                post_all_cols = post_num_cols + post_cat_cols
+
+                                # Bağımsız ve bağımlı değişken seçimi
+                                post_ind_var = st.selectbox('Bağımsız değişkeni seçin (kategorik olmalı):',
+                                                            options=post_cat_cols,
+                                                            key=f"postmp_ind_var_{postmpcounter}")  # benzersiz key
+
+                                post_dep_var = st.selectbox('Bağımlı değişkeni seçin (nümerik olmalı):',
+                                                            options=post_all_cols,
+                                                            key=f"postmp_dep_var_{postmpcounter}")  # benzersiz key
+
+                                # Bağımsız değişkenin unique değerlerinin kontrolü
+                                post_unique_values = df[post_ind_var].nunique()
+                                if post_unique_values > 2:
+                                    st.error(
+                                        f"Bağımsız değişkenin ({post_ind_var}) unique değer sayısı {post_unique_values}. ANOVA testi yapılmalıdır!")
+
+                                else:
+                                    # Normallik Varsayımı
+                                    st.write("**1. Normallik Varsayımı**")
+                                    st.write(
+                                        "**Hipotezler:** \n\n **H0:** Normal dağılım varsayımı sağlanmaktadır. \n\n **H1:** Normal dağılım varsayımı sağlanmamaktadır.")
+                                    post_p_values = []  # Normallik testinin p-value'larını saklamak için
+                                    for post_unique_value in df[post_ind_var].unique():
+                                        post_test_stat, post_pvalue = shapiro(
+                                            df.loc[df[post_ind_var] == post_unique_value, post_dep_var])
+                                        st.write(
+                                            f'**Bağımsız değişken: {post_ind_var} - Unique Değer: {post_unique_value}**')
+                                        st.write(
+                                            f'Test Stat = {post_test_stat:.4f}, p-value = {post_pvalue:.4f}')
+                                        post_p_values.append(
+                                            post_pvalue)  # Her bir grubun p-value değeri listeye eklenir
+
+                                    # Normallik varsayımı kontrolü
+                                    if all(p < 0.05 for p in
+                                           post_p_values):  # Her iki p-value değeri de 0.05'ten küçükse
+                                        st.write("**H0 RED:** Yani normallik varsayımı sağlanmamaktadır.")
+                                        post_normallik_saglandi = False
+                                    else:
+                                        st.write(
+                                            "**H0 REDDEDİLEMEZ:** Yani normallik varsayımı sağlanmaktadır.")
+                                        post_normallik_saglandi = True
+
+                                    # Varyans Homojenliği
+                                    if post_normallik_saglandi:
+                                        st.write("**2. Varyans Homojenliği**")
+                                        st.write(
+                                            "**Hipotezler:** \n\n **H0:** Varyanslar Homojendir. \n\n **H1:** Varyanslar Homojen Değildir.")
+                                        post_test_stat, post_pvalue = levene(
+                                            df.loc[
+                                                df[post_ind_var] == df[post_ind_var].unique()[0], post_dep_var],
+                                            df.loc[
+                                                df[post_ind_var] == df[post_ind_var].unique()[1], post_dep_var]
+                                        )
+                                        st.write(
+                                            f'**Varyans Homojenliği Testi** - Test Stat = {post_test_stat:.4f}, p-value = {post_pvalue:.4f}')
+
+                                        if np.isnan(post_pvalue):
+                                            st.write("**P-değeri NaN:** Test sonucuna karar verilemiyor.")
+                                            post_equal_var = None
+                                        else:
+                                            if post_pvalue < 0.05:
+                                                st.write(
+                                                    "**H0 RED:** Yani varyans homojenliği sağlanmamaktadır.")
+                                                post_equal_var = False
+                                            else:
+                                                st.write(
+                                                    "**H0 REDDEDİLEMEZ:** Yani varyans homojenliği sağlanmaktadır.")
+                                                post_equal_var = True
+                                    else:
+                                        st.write(
+                                            "**Normal dağılım varsayımı sağlanmadığı için varyans homojenliği varsayımına bakılmaksızın teste geçilecek.**")
+                                        post_equal_var = False
+
+                                    if post_equal_var is None:
+                                        st.write("**Veri setinde NaN değerler var. Çalışma durduruldu!**")
+                                    else:
+                                        # Ortalama ve Medyanların Gösterilmesi
+                                        st.write("**3. Grupların Ortalama ve Medyanları:**")
+                                        st.write(
+                                            df.groupby(post_ind_var).agg({post_dep_var: ["mean", "median"]}))
+
+                                        # Testlerin uygulanması
+                                        st.write("**4. Test Sonuçları:**")
+                                        st.write(
+                                            "**Hipotezler:** \n\n **H0:** M1 = M2  : Bağımsız değişken grup ortalamaları ile bağımlı değişken arasında anlamlı ilişki yoktur. \n\n **H1:** M1 != M2 : bağımsız değişken grup ortalamaları ile bağımlı değişken arasında anlamlı ilişki vardır.")
+                                        if post_normallik_saglandi:  # Normallik sağlanıyorsa T testi yapılacak
+                                            post_test_stat, post_pvalue = ttest_ind(
+                                                df.loc[df[post_ind_var] == df[post_ind_var].unique()[
+                                                    0], post_dep_var],
+                                                df.loc[df[post_ind_var] == df[post_ind_var].unique()[
+                                                    1], post_dep_var],
+                                                equal_var=post_equal_var
+                                            )
+                                            st.write(
+                                                f'**T Testi - Test Stat** - Test Stat = {post_test_stat:.4f}, p-value = {post_pvalue:.4f}')
+                                        else:  # Normallik sağlanmıyorsa Mann-Whitney U testi kullanılacak
+                                            post_test_stat, post_pvalue = mannwhitneyu(
+                                                df.loc[df[post_ind_var] == df[post_ind_var].unique()[
+                                                    0], post_dep_var],
+                                                df.loc[df[post_ind_var] == df[post_ind_var].unique()[
+                                                    1], post_dep_var]
+                                            )
+                                            st.write(
+                                                f'**Mann-Whitney U Testi** - Test Stat = {post_test_stat:.4f}, p-value = {post_pvalue:.4f}')
+
+                                        # Sonuçların yorumlanması
+                                        if post_pvalue < 0.05:
+                                            st.write(
+                                                f"**H0 RED Edildi:** Yani seçilen bağımsız değişken ({post_ind_var}) ile bağımlı değişken ({post_dep_var}) arasında anlamlı fark vardır.")
+                                        else:
+                                            st.write(
+                                                f"**H0 REDDEDİLEMEZ:** Yani seçilen bağımsız değişken ({post_ind_var}) ile bağımlı değişken ({post_dep_var}) arasında anlamlı fark yoktur.")
+
+                            ################################################################################################
+                            ##################   İki Örneklem Oran Testi
+                            ################################################################################################
+
+                            # Eğer "İki Örneklem Oran Testi" seçilirse
+                            if postmp_category_choice == "İki Örneklem Oran Testi":
+
+                                # Benzersiz key ile button oluşturma
+                                st.button("Yorumlama hk.",
+                                          help="""Soru: iki örneklem T testi sonucunda anlamlı ilişki bulurken iki örneklem oran testinde anlamlı ilişki yoktur sonucuna ulaşıyorum. Bu mümkün müdür? Nasıl yorumlamam gerekiyor?""",
+                                          key=f"post_postmp_labalabalab_button_{postmpcounter}")
+
+                                # Kategorik ve nümerik değişkenleri tespit etme
+                                post_oran_cat_cols, post_oran_num_cols, post_oran_cat_but_car, post_oran_num_but_cat = grab_col_names(
+                                    df, num_but_cat_arg,
+                                    cat_but_car_arg)
+                                post_oran_all_cols = post_oran_num_cols + post_oran_cat_cols
+
+                                # Kullanıcıdan bağımsız değişkeni seçmesini isteyelim
+                                post_oran_selected_column_meas = st.selectbox(
+                                    'Bağımsız değişkeni seçin:',
+                                    options=post_oran_cat_cols,
+                                    key=f"postmporan_selected_column_meas_{postmpcounter}"  # mp_counter ile benzersiz key
+                                )
+
+                                # Kullanıcıdan hedef değişkeni seçmesini isteyelim
+                                post_oran_fe_target_var_meas = st.selectbox(
+                                    'Hedef değişkeni seçin:',
+                                    options=post_oran_all_cols,
+                                    key=f"postmporan_fe_target_var_meas_{postmpcounter}"  # mp_counter ile benzersiz key
+                                )
+
+                                # Eğer herhangi bir seçim yapmazsa döngü sonlandırılabilir
+                                if not post_oran_selected_column_meas or not post_oran_fe_target_var_meas:
+                                    st.write("Herhangi bir değişken seçilmedi. Döngü sonlandırılıyor.")
+                                else:
+                                    # Hedef değişken için başarı değerini seçmesi sağlanıyor
+                                    post_success_value = st.selectbox(
+                                        f"Başarı oranı için '{post_oran_fe_target_var_meas}' değişkeninde hangi değeri başarı olarak kabul ediyorsunuz?",
+                                        options=df[post_oran_fe_target_var_meas].unique(),
+                                        key=f"postmpsuccess_value_{postmpcounter}"
+                                    )
+
+                                    # Yeni eklenen değişkenin unique değer sayısını kontrol edelim
+                                    post_oran_unique_values_meas = df[post_oran_selected_column_meas].unique()
+                                    post_oran_num_unique_values_meas = len(post_oran_unique_values_meas)
+
+                                    if post_oran_num_unique_values_meas == 1:
+                                        # Tek unique değer varsa
+                                        st.write(
+                                            f"Tek unique değer bulunmaktadır: {post_oran_unique_values_meas[0]}")
+                                    elif post_oran_num_unique_values_meas == 2:
+                                        # İki unique değer varsa proportions_ztest testi yapılacak
+                                        st.write(
+                                            f"İki unique değer bulunmaktadır. Değerler: {post_oran_unique_values_meas}")
+
+                                        # İki grup için başarı oranlarını hesaplayalım
+                                        post_group1 = post_oran_unique_values_meas[0]
+                                        post_group2 = post_oran_unique_values_meas[1]
+
+                                        # Grup 1 ve Grup 2'nin başarı oranları ve gözlem sayıları
+                                        post_group1_success = df.loc[
+                                            (df[post_oran_selected_column_meas] == post_group1) & (
+                                                        df[post_oran_fe_target_var_meas] == post_success_value),
+                                            post_oran_fe_target_var_meas].count()
+                                        post_group2_success = df.loc[
+                                            (df[post_oran_selected_column_meas] == post_group2) & (
+                                                        df[post_oran_fe_target_var_meas] == post_success_value),
+                                            post_oran_fe_target_var_meas].count()
+
+                                        post_group1_nobs = df.loc[df[
+                                                                 post_oran_selected_column_meas] == post_group1, post_oran_fe_target_var_meas].shape[
+                                            0]
+                                        post_group2_nobs = df.loc[df[
+                                                                 post_oran_selected_column_meas] == post_group2, post_oran_fe_target_var_meas].shape[
+                                            0]
+
+                                        # Başarı oranı hesaplama
+                                        post_group1_success_rate = post_group1_success / post_group1_nobs if post_group1_nobs != 0 else 0
+                                        post_group2_success_rate = post_group2_success / post_group2_nobs if post_group2_nobs != 0 else 0
+
+                                        # Sonuçları tablo şeklinde göstermek için DataFrame oluşturalım
+                                        post_success_df = pd.DataFrame({
+                                            f"Grup {post_oran_selected_column_meas}": [post_group1, post_group2],
+                                            "Başarı Sayısı": [post_group1_success, post_group2_success],
+                                            "Gözlem Sayısı": [post_group1_nobs, post_group2_nobs],
+                                            "Başarı Oranı": [post_group1_success_rate, post_group2_success_rate]
+                                        })
+
+                                        st.write("**1. Grup bazında başarı oranları:**")
+                                        st.dataframe(post_success_df)
+
+                                        st.write("**2. Test Sonuçları**")
+                                        st.write(
+                                            "**Hipotezler:** \n\n **H0:** p1 = p2  : Bağımsız değişken grup başarım oranı ile bağımlı değişken arasında anlamlı ilişki yoktur. \n\n **H1:** p1 != p2 : Bağımsız değişken grup başarım oranı ile bağımlı değişken arasında anlamlı ilişki vardır.")
+
+                                        if post_group1_nobs == 0 or post_group2_nobs == 0:  # Boş kümelerde test yapmamak için kontrol
+                                            st.write(f"**Yeterli veri yok. Test yapılmadı.**")
+                                        else:
+                                            post_oran_test_stat, post_oran_pvalue = proportions_ztest(
+                                                count=[post_group1_success, post_group2_success],
+                                                nobs=[post_group1_nobs, post_group2_nobs]
+                                            )
+
+                                            st.write(
+                                                f'H0 için Test Stat = {post_oran_test_stat:.4f}, p-value = {post_oran_pvalue:.4f}')
+                                            if post_oran_pvalue < 0.05:
+                                                st.write(
+                                                    f"**H0 hipotezi reddedildi:** Yani seçilen bağımsız değişken ({post_oran_selected_column_meas}) ile hedef değişken ({post_oran_fe_target_var_meas}) arasında fark vardır.")
+                                            else:
+                                                st.write(
+                                                    f"**H0 hipotezi reddedilemedi:** Yani seçilen bağımsız değişken ({post_oran_selected_column_meas}) ile hedef değişken ({post_oran_fe_target_var_meas}) arasında fark yoktur.")
+
+                                    elif oran_num_unique_values_meas > 2:
+                                        st.write(
+                                            f"{post_oran_num_unique_values_meas} unique değer bulunmaktadır. ANOVA testi yapınız.")
+
+                            ################################################################################################
+                            ##################   ANOVA
+                            ################################################################################################
+
+                            if postmp_category_choice == "ANOVA":
+
+                                # Kategorik ve nümerik değişkenleri alıyoruz
+                                post_cat_cols, post_num_cols, post_cat_but_car, post_num_but_cat = grab_col_names(df,
+                                                                                              num_but_cat_arg,
+                                                                                              cat_but_car_arg)
+
+                                # Bağımsız ve bağımlı değişken seçimi
+                                post_anova_ind_var = st.selectbox('Bağımsız değişkeni seçin (kategorik olmalı):',
+                                                             options=post_cat_cols, key=f"postmpanova_ind_var_{postmpcounter}")
+                                post_anova_dep_var = st.selectbox(
+                                    'Bağımlı değişkeni seçin (nümerik-sürekli olmalı):',
+                                    options=post_num_cols, key=f"postmpanova_dep_var_{postmpcounter}")
+
+                                # NaN değerleri ayrı bir grup olarak inceleyelim
+                                post_unique_groups = df[post_anova_ind_var].unique().tolist()
+
+                                # NaN değerleri manuel olarak ekliyoruz
+                                if df[post_anova_ind_var].isna().sum() > 0:
+                                    post_unique_groups.append(np.nan)  # NaN'ı gruba ekle
+
+                                post_group_sizes = {
+                                    group: len(df.loc[df[post_anova_ind_var] == group, post_anova_dep_var]) if pd.notna(
+                                        group)
+                                    else len(df.loc[df[post_anova_ind_var].isna(), post_anova_dep_var]) for group in
+                                    post_unique_groups}
+
+                                st.write("**0. Test için yeterli veri sayısı bulunuyor mu? Veri sayıları:**")
+                                # Her grup için boyutları yazdırıyoruz
+                                for group, size in post_group_sizes.items():
+                                    if pd.isna(group):
+                                        st.write(f"**Group:** NaN, Size: {size}")
+                                    else:
+                                        st.write(f"**Group:** {group}, Size: {size}")
+
+                                # Eğer herhangi bir grup 3'ten küçükse, uyarı verip işlemi durduruyoruz
+                                if any(size < 3 for size in post_group_sizes.values()):
+                                    st.write(
+                                        "Her bir grupta en az 3 veri bulunmalıdır. Test işlemi yapılamıyor.")
+
+                                else:
+                                    # Normallik Varsayımı (Shapiro Testi)
+                                    st.write("**1. Normallik Varsayımı**")
+                                    post_normallik_kontrolu = []
+                                    for group in post_unique_groups:
+                                        post_anovanom_pvalue = \
+                                        shapiro(df.loc[df[post_anova_ind_var] == group, post_anova_dep_var])[1]
+                                        st.write(f'**Grup:** {group} - p-value: {post_anovanom_pvalue:.4f}')
+                                        post_normallik_kontrolu.append(post_anovanom_pvalue)
+                                        if post_anovanom_pvalue < 0.05:
+                                            st.write(
+                                                f"Grup '{group}' için normallik varsayımı sağlanmamaktadır.")
+                                        else:
+                                            st.write(f"Grup '{group}' için normallik varsayımı sağlanmaktadır.")
+
+                                    # Varyans Homojenliği (Levene Testi)
+                                    st.write("**2. Varyans Homojenliği**")
+                                    post_test_stat, post_anovavar_pvalue = levene(
+                                        *[df.loc[df[post_anova_ind_var] == group, post_anova_dep_var] for group in
+                                          post_unique_groups]
+                                    )
+                                    st.write(
+                                        f'Varyans Homojenliği Testi - Test Stat = {post_test_stat:.4f}, p-value = {post_anovavar_pvalue:.4f}')
+
+                                    # P-değerinin NaN olup olmadığını kontrol edelim
+                                    if np.isnan(post_anovavar_pvalue):
+                                        st.write(
+                                            "**P-değeri NaN: Test sonucuna karar verilemiyor. Varyans homojenliği hakkında kesin bir sonuca varılamadı.**")
+                                    else:
+                                        if post_anovavar_pvalue < 0.05:
+                                            st.write("**H0 RED:** Yani varyans homojenliği sağlanmamaktadır.")
+                                        else:
+                                            st.write(
+                                                "**H0 REDDEDİLEMEZ:** Yani varyans homojenliği sağlanmaktadır.")
+
+                                        # Ortalama ve Medyanların Gösterilmesi
+                                        st.write("**3. Grupların Ortalama ve Medyanları:**")
+                                        st.write(
+                                            df.groupby(post_anova_ind_var).agg({post_anova_dep_var: ["mean", "median"]}))
+
+                                        # Varsayımlara göre testlerin seçilmesi
+                                        st.write("**4. Uygulanacak Test:**")
+                                        st.write(
+                                            "**Hipotez:** \n\n **H0:** m1 = m2 = m3 = m4 ...  : Grup ortalamaları arasında fark yoktur. \n\n **H1:** m1 != m2 != m3 != ...  : Grup ortalamaları arasında fark vardır.")
+                                        if all(p >= 0.05 for p in post_normallik_kontrolu):
+                                            if post_anovavar_pvalue >= 0.05:
+                                                # Normallik ve varyans homojenliği sağlanıyorsa f-oneway
+                                                st.write(
+                                                    "Normallik ve varyans homojenliği sağlandığından Parametrik ANOVA testi (f-oneway) uygulanacak.")
+                                                post_test_stat, post_anovap_pvalue = f_oneway(
+                                                    *[df.loc[df[post_anova_ind_var] == group, post_anova_dep_var] for
+                                                      group in post_unique_groups]
+                                                )
+                                                st.write(
+                                                    f'**Parametrik ANOVA Testi (f-oneway)** - Test Stat = {post_test_stat:.4f}, p-value = {post_anovap_pvalue:.4f}')
+                                                if post_anovap_pvalue < 0.05:
+                                                    st.write(
+                                                        f"**H0 reddedildi:** Bağımsız değişken ({post_anova_ind_var}) ile bağımlı değişken ({post_anova_dep_var}) arasında anlamlı fark vardır.")
+                                                else:
+                                                    st.write(
+                                                        f"**H0 reddedilemedi:** Bağımsız değişken ({post_anova_ind_var}) ile bağımlı değişken ({post_anova_dep_var}) arasında anlamlı fark yoktur.")
+                                            else:
+                                                # Normallik sağlanıyor ama varyans homojenliği sağlanmıyorsa Kruskal-Wallis testi
+                                                st.write(
+                                                    "Normallik sağlanıyor, ancak varyans homojenliği sağlanmadığından Kruskal-Wallis testi uygulanacak.")
+                                                post_test_stat, post_anovanonp_pvalue = kruskal(
+                                                    *[df.loc[df[post_anova_ind_var] == group, post_anova_dep_var] for
+                                                      group in post_unique_groups]
+                                                )
+                                                st.write(
+                                                    f'**Nonparametrik ANOVA Testi (Kruskal)** - Test Stat = {post_test_stat:.4f}, p-value = {post_anovanonp_pvalue:.4f}')
+                                                if post_anovanonp_pvalue < 0.05:
+                                                    st.write(
+                                                        f"**H0 reddedildi:** Bağımsız değişken ({post_anova_ind_var}) ile bağımlı değişken ({post_anova_dep_var}) arasında anlamlı fark vardır.")
+                                                else:
+                                                    st.write(
+                                                        f"**H0 reddedilemedi:** Bağımsız değişken ({post_anova_ind_var}) ile bağımlı değişken ({post_anova_dep_var}) arasında anlamlı fark yoktur.")
+
+                                        else:
+                                            # Normallik veya varyans homojenliği sağlanmadığında sadece Kruskal-Wallis testi uygulanacak
+                                            st.write(
+                                                "Normallik varsayımı sağlanmadığından Kruskal-Wallis testi uygulanacak.")
+                                            post_test_stat, post_anovanonp_pvalue = kruskal(
+                                                *[df.loc[df[post_anova_ind_var] == group, post_anova_dep_var] for group in
+                                                  post_unique_groups]
+                                            )
+                                            st.write(
+                                                f'**Nonparametrik ANOVA Testi (Kruskal)** - Test Stat = {post_test_stat:.4f}, p-value = {post_anovanonp_pvalue:.4f}')
+                                            if post_anovanonp_pvalue < 0.05:
+                                                st.write(
+                                                    f"**H0 reddedildi:** Bağımsız değişken ({post_anova_ind_var}) ile bağımlı değişken ({post_anova_dep_var}) arasında anlamlı fark vardır.")
+                                            else:
+                                                st.write(
+                                                    f"**H0 reddedilemedi:** Bağımsız değişken ({post_anova_ind_var}) ile bağımlı değişken ({post_anova_dep_var}) arasında anlamlı fark yoktur.")
+
+                                        # Tukey HSD Testi
+                                        st.write("**5. Tukey HSD testi:**")
+                                        st.write(
+                                            "Anlamlı farkın hangi gruptan kaynaklandığını anlamak için Tukey HSD testi uygulayabilirsiniz:")
+                                        post_tk_value = st.number_input(
+                                            'Tukey HSD Testi için tk (yanlış pozitiflik riski) değerini girin (genel kabul değer 0.05 - default)',
+                                            value=0.05, key=f"postmptk_value_{postmpcounter}")
+
+                                        # Tukey HSD testi
+                                        post_comparison = MultiComparison(df[post_anova_dep_var], df[post_anova_ind_var])
+                                        post_tukey = post_comparison.tukeyhsd(post_tk_value)
+
+                                        # Tukey sonuçlarını DataFrame olarak gösterelim
+                                        post_tukey_df = pd.DataFrame(data=post_tukey.summary().data[1:],
+                                                                columns=post_tukey.summary().data[0])
+                                        st.write(post_tukey_df)
+
+
+                            # Kullanıcıya başka bir işlem yapmak isteyip istemediği soruluyor
+                            post_ca_continue_or_not = st.radio(
+                                "Başka bir işlem yapmak istiyor musunuz?",
+                                ("Evet", "Hayır"),
+                                index=1,
+                                key=f"postmp_ca_continue_or_not_{postmpcounter}"
+                            )
+
+                            if post_ca_continue_or_not == "Hayır":
+                                st.write("Döngü sonlandırıldı.")
+                                break
+
+                        # Her adımda post_mpcounter artırılıyor
+                        postmpcounter += 1
+
+                    ####################################
+                    ################ POST-OVERVIEW ÜST TABI - Analysis bölümü - Correlation Matrix alt tabı
+                    ####################################
+
+                    with post_vtab5.expander("Correlation Analysis"):  # Correlation Matrix
+
+                        post_corr_anal = st.checkbox("Perform Correlation?", key="post_corr_anal")
+
+                        if post_corr_anal:
+
+                            post_remove_vars = st.radio(
+                                "Do you want to remove any variables before creating the correlation matrix?",
+                                ("No", "Yes"), key="post_remove_vars"
+                            )
+
+                            if post_remove_vars == "Yes":
+                                # Allow user to select variables to remove
+                                post_variables_to_remove = st.multiselect(
+                                    "Select variables to remove before creating the initial correlation matrix:",
+                                    df.columns, key="post_variables_to_remove"
+                                )
+                                # Create a local copy of the DataFrame and drop selected variables
+                                post_local_df = df.drop(columns=post_variables_to_remove)
+                            else:
+                                # If no variables are removed, use the original DataFrame
+                                post_variables_to_remove = []
+                                post_local_df = df.copy()
+
+                            # Filter the DataFrame to include only numeric columns
+                            post_numeric_df = post_local_df.select_dtypes(include=[np.number])
+
+                            # Calculate the correlation matrix
+                            post_corr = post_numeric_df.corr()
+                            post_cor_matrix = post_corr.abs()
+
+                            # Ask the user if they want to plot the correlation heatmap
+                            post_plot_corr = st.checkbox("Plot Correlation Heatmap", key="post_plot_corr")
+
+                            # Optionally plot the correlation matrix
+                            if post_plot_corr:
+                                fig, ax = plt.subplots(figsize=(15, 15))
+                                sns.heatmap(post_corr, cmap="RdBu", ax=ax)
+                                st.pyplot(fig)
+
+                            # Display the correlation matrix and list of highly correlated columns
+                            st.write("Correlation Matrix:", post_cor_matrix)
+
+                            ######## Allow the user to select two numerical variables to plot the correlation scatter
+                            post_binary_correlation_scatter = st.checkbox(
+                                "Do you want to see two variables correlation scatter?",
+                                key="post_binary_correlation_scatter")
+
+                            if post_binary_correlation_scatter:
+                                st.write("## Correlation Scatter Plot")
+                                post_numerical_columns = post_numeric_df.select_dtypes(include=[np.number]).columns
+                                post_selected_columns = st.multiselect(
+                                    "Select two numerical variables to see their correlation scatter plot:",
+                                    post_numerical_columns, default=post_numerical_columns[:2],
+                                    key="post_selected_columns"
+                                )
+
+                                # Ensure that exactly two columns are selected
+                                if len(post_selected_columns) == 2:
+                                    # Scatter plot of the two selected columns
+                                    st.write(
+                                        f"Scatter plot of {post_selected_columns[0]} vs {post_selected_columns[1]}")
+                                    fig, ax = plt.subplots()
+                                    post_numeric_df.plot.scatter(x=post_selected_columns[0], y=post_selected_columns[1],
+                                                                 ax=ax)
+                                    st.pyplot(fig)
+
+                                    # Display the correlation value
+                                    post_corr_value = post_numeric_df[post_selected_columns[0]].corr(
+                                        post_numeric_df[post_selected_columns[1]])
+                                    st.write(
+                                        f"Correlation between {post_selected_columns[0]} and {post_selected_columns[1]}: {post_corr_value:.2f}")
+
+                                    if post_corr_value > 0:
+                                        st.write(
+                                            f"As {post_selected_columns[0]} increases, {post_selected_columns[1]} tends to increase.")
+                                    else:
+                                        st.write(
+                                            f"As {post_selected_columns[0]} increases, {post_selected_columns[1]} tends to decrease.")
+                                else:
+                                    st.write("Please select exactly two numerical variables.")
+
+                            ######## Highly Correlated Columns
+                            post_highly_correlated_columns = st.checkbox(
+                                "Do you want to see highly correlated columns?", key="post_highly_correlated_columns")
+
+                            if post_highly_correlated_columns:
+                                # Kullanıcıdan corr_th için input al
+                                post_corr_th = st.number_input("Enter correlation threshold (corr_th):", min_value=0.0,
+                                                               max_value=1.0, value=0.9, step=0.000001,
+                                                               key="post_corr_th")
+
+                                if post_highly_correlated_columns:
+                                    # Identify highly correlated columns
+                                    post_upper_triangle_matrix = post_cor_matrix.where(
+                                        np.triu(np.ones(post_cor_matrix.shape), k=1).astype(bool))
+                                    post_drop_list = [col for col in post_upper_triangle_matrix.columns if
+                                                      any(post_upper_triangle_matrix[col] > post_corr_th)]
+
+                                    # If there are columns to drop, show the correlation matrix after dropping them
+                                    if post_drop_list:
+                                        st.write(f"Highly correlated columns (corr_th > {post_corr_th}):",
+                                                 post_drop_list)
+
+                                        post_all_vars_to_drop = list(set(post_variables_to_remove + post_drop_list))
+
+                                        # Kullanıcıya drop_list içindeki değişkenlerden seçim yapmasına izin ver
+                                        post_columns_to_drop = st.multiselect(
+                                            "Select columns to drop from the highly correlated list and the list if you have selected the variables to remove before creating the initial correlation matrix:",
+                                            post_all_vars_to_drop, key="post_columns_to_drop"
+                                        )
+
+                                        if post_columns_to_drop:
+                                            # Create a local copy of the DataFrame and drop the combined list of columns
+                                            post_df = df.drop(columns=post_columns_to_drop)
+
+                                            st.write("Current DataFrame:")
+                                            st.write(post_df)
 
                 ## Kullanıcı bu veri seri bir zaman serisidir der ise burası çalışacak!! kodu rev. et!!
                 #overview_tab.subheader("Zaman Serisi Ayrıştırması")
