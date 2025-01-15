@@ -4,3 +4,4 @@ plotly
 requests
 bs4
 yfinance 
+scikit-learn
