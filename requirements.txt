@@ -9,3 +9,4 @@ xgboost
 lightgbm
 xgboost
 catboost 
+statsmodels
