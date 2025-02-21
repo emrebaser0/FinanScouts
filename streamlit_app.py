@@ -2615,15 +2615,6 @@ def main():
 
 
 
-
-    # Resampled DataFrame'i gösterme
-    st.write("Resampled DataFrame with Aggregated Values (Mean, Min, Max):")
-    st.write(an_df_resampled)
-
-
-
-
-
                                                 if resample_data == "Yes":
                                                     resample_freq = st.selectbox(
                                                         "Select the resampling frequency:",
