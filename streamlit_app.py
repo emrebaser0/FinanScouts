@@ -2616,7 +2616,7 @@ def main():
                                                 if resample_data == "Yes":
                                                     resample_freq = st.selectbox(
                                                         "Select the resampling frequency:",
-                                                        ['MS', 'Q', 'Y'],  # Monthly, Quarterly, Yearly
+                                                        ['W', 'MS', 'Q', 'Y'],  # Monthly, Quarterly, Yearly
                                                         key=f"resample_freq_{cacounter}"
                                                     )
                                                     an_df = an_df.resample(resample_freq).mean()
