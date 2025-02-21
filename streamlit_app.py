@@ -2613,6 +2613,17 @@ def main():
                                                     key=f"resample_{cacounter}"
                                                 )
 
+
+
+
+    # Resampled DataFrame'i gösterme
+    st.write("Resampled DataFrame with Aggregated Values (Mean, Min, Max):")
+    st.write(an_df_resampled)
+
+
+
+
+
                                                 if resample_data == "Yes":
                                                     resample_freq = st.selectbox(
                                                         "Select the resampling frequency:",
@@ -2620,6 +2631,14 @@ def main():
                                                         key=f"resample_freq_{cacounter}"
                                                     )
                                                     an_df = an_df.resample(resample_freq).mean()
+                                                        # Resampling işlemi, ortalama, min, max değerleri ile
+                                                        an_df_resampled = an_df.resample(resample_freq).agg({
+                                                        target_col: ['mean', 'min', 'max']
+                                                    })
+
+                                                    # Resampled DataFrame'i gösterme
+                                                    st.write("Resampled DataFrame with Aggregated Values (Mean, Min, Max):")
+                                                    st.write(an_df_resampled)
 
                                                 # Model seçimi
                                                 decomposition_model = st.selectbox(
