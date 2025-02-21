@@ -2623,7 +2623,7 @@ def main():
                                                     )
                                                     an_df = an_df.resample(resample_freq).mean()
                                                         # Resampling işlemi, ortalama, min, max değerleri ile
-                                                        an_df_resampled = an_df.resample(resample_freq).agg({target_col: ['mean'])
+                                                    an_df_resampled = an_df.resample(resample_freq).agg({target_col: ['mean'])
 
                                                     # Resampled DataFrame'i gösterme
                                                     st.write("Resampled DataFrame with Aggregated Values (Mean, Min, Max):")
