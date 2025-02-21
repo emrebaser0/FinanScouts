@@ -2458,7 +2458,7 @@ def main():
                                                 key=f"convert_to_datetime_{cacounter}"
                                             )
                                             if convert_to_datetime == "Yes":
-                                                an_df[selected_time_var] = pd.to_datetime(an_df[selected_time_var], utc=True)
+                                                an_df[selected_time_var] = pd.to_datetime(an_df[selected_time_var], utc=True, format='mixed')
                                                 st.write(
                                                     f"'{selected_time_var}' has been successfully converted to datetime.")
 
