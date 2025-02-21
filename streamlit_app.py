@@ -2576,35 +2576,7 @@ def main():
                                                 an_df = an_df.set_index(
                                                     pd.DatetimeIndex(an_df[selected_time_var])).asfreq(freq_code)
 
-                                                # Eksik verileri nasıl ele alacağımızı kullanıcıya soralım
-                                                handle_missing_values = st.radio(
-                                                    "How do you want to handle missing values in the time series?",
-                                                    ("Remove Missing Values",
-                                                     "Fill Missing Values with Forward Fill",
-                                                     "Fill Missing Values with Backward Fill",
-                                                     "Fill Missing Values with Zero",
-                                                     "Fill Missing Values with Mean",
-                                                     "Interpolate Missing Values"),
-                                                    key=f"handle_missing_{cacounter}"
-                                                )
 
-                                                if handle_missing_values == "Remove Missing Values":
-                                                    an_df = an_df.dropna(subset=[target_col])
-                                                elif handle_missing_values == "Fill Missing Values with Forward Fill":
-                                                    an_df[target_col] = an_df[target_col].fillna(method='ffill')
-                                                elif handle_missing_values == "Fill Missing Values with Backward Fill":
-                                                    an_df[target_col] = an_df[target_col].fillna(method='bfill')
-                                                elif handle_missing_values == "Fill Missing Values with Zero":
-                                                    an_df[target_col] = an_df[target_col].fillna(0)
-                                                elif handle_missing_values == "Fill Missing Values with Mean":
-                                                    mean_value = an_df[target_col].mean()
-                                                    an_df[target_col] = an_df[target_col].fillna(mean_value)
-                                                elif handle_missing_values == "Interpolate Missing Values":
-                                                    an_df[target_col] = an_df[target_col].interpolate(method='linear')
-
-                                                # İşlem sonrası yeni DataFrame gösteriliyor
-                                                st.write("Updated DataFrame after handling missing values:")
-                                                st.write(an_df)
 
                                                 # Resample yapma seçeneği
                                                 resample_data = st.radio(
